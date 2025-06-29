@@ -2,12 +2,15 @@ PATH
   remote: .
   specs:
     ffi_llvm_jit (0.1.0)
+      ruby-llvm (~> 17)
 
 GEM
   remote: https://rubygems.org/
   specs:
     ast (2.4.3)
     diff-lcs (1.5.1)
+    ffi (1.17.2)
+    ffi (1.17.2-x86_64-linux-gnu)
     json (2.12.2)
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
@@ -49,6 +52,9 @@ GEM
     rubocop-ast (1.45.0)
       parser (>= 3.3.7.2)
       prism (~> 1.4)
+    ruby-llvm (17.0.0)
+      ffi (~> 1.13)
+      rake (>= 12, < 14)
     ruby-progressbar (1.13.0)
     unicode-display_width (3.1.4)
       unicode-emoji (~> 4.0, >= 4.0.4)

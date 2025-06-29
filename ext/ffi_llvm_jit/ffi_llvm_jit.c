@@ -1,9 +1,6 @@
 #include "ffi_llvm_jit.h"
 
-VALUE rb_mFfiLlvmJit;
-
-RUBY_FUNC_EXPORTED void
-Init_ffi_llvm_jit(void)
-{
-  rb_mFfiLlvmJit = rb_define_module("FfiLlvmJit");
+// See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Call.c
+char * ffi_llvm_jit_convert_string(VALUE arg) {
+    return NIL_P(arg) ? NULL : StringValueCStr(arg);
 }
