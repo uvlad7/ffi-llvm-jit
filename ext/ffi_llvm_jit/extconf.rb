@@ -2,9 +2,13 @@
 
 require "mkmf"
 
-# Makes all symbols private by default to avoid unintended conflict
-# with other gems. To explicitly export symbols you can use RUBY_FUNC_EXPORTED
-# selectively, or entirely remove this flag.
-append_cflags("-fvisibility=hidden")
+RbConfig::MAKEFILE_CONFIG['CC'] = RbConfig::CONFIG['CC'] = 'clang'
+RbConfig::MAKEFILE_CONFIG['CXX'] = RbConfig::CONFIG['CXX'] = 'clang++'
+RbConfig::MAKEFILE_CONFIG['LDSHARED'] = RbConfig::CONFIG['LDSHARED'] = "ruby -rfileutils -e 'FileUtils.cp(ARGV[2], ARGV[1])' -- "
+RbConfig::MAKEFILE_CONFIG['MKMF_VERBOSE'] = RbConfig::CONFIG['MKMF_VERBOSE'] = '1'
+
+$CFLAGS << " -emit-llvm -c "
+
+# MakeMakefile::COMPILE_C = config_string('COMPILE_C') || '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG) -c $(CSRCFLAG)$<'
 
 create_makefile("ffi_llvm_jit/ffi_llvm_jit")
