@@ -33,14 +33,13 @@ module FFI
       # FFI::Type::Builtin to LLVM types
       # FFI::NativeType.constants
       # https://github.com/ffi/ffi/blob/master/ext/ffi_c/Type.c#L410
-      SUPPORTED_TO_NATIVE = {
-        FFI::TYPE_STRING => :string,
-      }.freeze
+      SUPPORTED_TO_NATIVE = %i[string].each_with_object({}) do |type, hash|
+        hash[FFI.find_type(type)] = type
+      end.freeze
 
-      SUPPORTED_FROM_NATIVE = {
-        FFI::TYPE_UINT32 => :uint,
-        FFI::TYPE_ULONG => :ulong,
-      }.freeze
+      SUPPORTED_FROM_NATIVE = %i[int uint ulong].each_with_object({}) do |type, hash|
+        hash[FFI.find_type(type)] = type
+      end.freeze
 
       # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
@@ -74,11 +73,10 @@ module FFI
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
         # but we'd still need to know use libffi to create varargs
-
         ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
         if options[:convention] != :default || !options[:type_map].nil? ||
-           options[:blocking] || options[:enums] || ret_type_name.nil? || arg_types.any?(&:nil?)
+           options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
           return super(mname, cname, arg_types, ret_type, options)
         end
@@ -107,6 +105,8 @@ module FFI
       VALUE = POINTER
       LLVM_TYPES = {
         string: LLVM.Pointer(LLVM::Int8),
+        # uint, not uint32, because converters support platform-specific types
+        int: LLVM.const_get("Int#{FFI.type_size(:int) * 8}"),
         uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
         ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
       }.freeze
@@ -161,6 +161,7 @@ module FFI
         attach_rb_wrap_function(jit_name, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
         singleton_class.alias_method rb_name, jit_name
         alias_method rb_name, jit_name
+        nil
       end
 
       # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity

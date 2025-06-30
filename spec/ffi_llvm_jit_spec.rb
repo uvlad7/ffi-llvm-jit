@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe FFI::LLVMJIT do
+RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   let(:ffi_llvm_jit_lib) do
     Module.new.tap do |mod|
       mod.extend described_class::Library
@@ -31,9 +31,29 @@ RSpec.describe FFI::LLVMJIT do
   end
 
   it 'passes unsupported functions to FFI::Library' do
-    ret = ffi_llvm_jit_lib.attach_function :printf, [:string, :varargs], :int
-    expect(ret).to be_a_kind_of(FFI::VariadicInvoker)
+    ret = ffi_llvm_jit_lib.attach_function :printf, %i[string varargs], :int
+    expect(ret).to be_a(FFI::VariadicInvoker)
     expect(defined?(ffi_llvm_jit_lib.printf)).to be_truthy
     expect(defined?(ffi_llvm_jit_lib.llvm_jit_printf)).to be_nil
+
+    res = ffi_llvm_jit_lib.attach_function :free, [:pointer], :void
+    expect(res).to be_a(FFI::Function)
+    expect(defined?(ffi_llvm_jit_lib.free)).to be_truthy
+    expect(defined?(ffi_llvm_jit_lib.llvm_jit_free)).to be_nil
+
+    res = ffi_llvm_jit_lib.attach_function :strlen4, :strlen, [:string], :size_t, blocking: true
+    expect(res).to be_a(FFI::Function)
+
+    expect(ffi_llvm_jit_lib.attach_function(:strlen5, :strlen, [:string], :size_t)).to be_nil
+    ffi_llvm_jit_lib.typedef :size_t, :length
+    expect(ffi_llvm_jit_lib.attach_function(:strlen6, :strlen, [:string], :size_t)).to be_a(FFI::Function)
+  end
+
+  it 'supports multiple args' do
+    expect(ffi_llvm_jit_lib.attach_function(:strcmp, %i[string string], :int)).to be_nil
+    expect(ffi_llvm_jit_lib.attach_function(:strcasecmp, %i[string string], :int)).to be_nil
+    expect(ffi_llvm_jit_lib.llvm_jit_strcmp('a', 'b')).to be < 1
+    expect(ffi_llvm_jit_lib.llvm_jit_strcmp('ABBA', 'abBA')).to be < 1
+    expect(ffi_llvm_jit_lib.llvm_jit_strcasecmp('ABBA', 'abBA')).to be 0
   end
 end

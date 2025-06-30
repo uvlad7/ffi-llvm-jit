@@ -6,6 +6,11 @@ __attribute__((always_inline)) char * ffi_llvm_jit_value_to_string(VALUE arg) {
 }
 
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Types.c
+__attribute__((always_inline)) VALUE ffi_llvm_jit_int_to_value(int arg) {
+    return INT2NUM(arg);
+}
+
+// See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Types.c
 __attribute__((always_inline)) VALUE ffi_llvm_jit_uint_to_value(unsigned int arg) {
     return UINT2NUM(arg);
 }
