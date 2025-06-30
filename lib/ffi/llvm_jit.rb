@@ -27,6 +27,7 @@ module FFI
       private_constant :LLVM_MOD, :LLVM_ENG
 
       # LLVM_ENG.dispose is never called
+      # https://llvm.org/doxygen/group__LLVMCTarget.html#gaaa9ce583969eb8754512e70ec4b80061
       # LLVM_MOD.dump
 
       # # Native integer type

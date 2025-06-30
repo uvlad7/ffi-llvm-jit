@@ -65,8 +65,16 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     # Don't use it in real life code!
     ffi_llvm_jit_lib.attach_function :strtoul, %i[string string int], :ulong
     ffi_llvm_jit_lib.attach_function :strtol, %i[string string int], :long
-    ulong_max = (2**(FFI.find_type(:ulong).size * 8)) - 1
+    ulong_max = (2 ** (FFI.find_type(:ulong).size * 8)) - 1
     expect(ffi_llvm_jit_lib.llvm_jit_strtoul(ulong_max.to_s, nil, 0)).to eq ulong_max
     expect(ffi_llvm_jit_lib.llvm_jit_strtol('-1', nil, 0)).to eq(-1)
+  end
+
+  it 'supports string return values' do
+    ffi_llvm_jit_lib.attach_function :getenv, [:string], :string
+    ENV['JIT_ANSWER'] = '42'
+    expect(ffi_llvm_jit_lib.llvm_jit_getenv('JIT_ANSWER')).to eq('42')
+    ENV.delete('JIT_ANSWER')
+    expect(ffi_llvm_jit_lib.llvm_jit_getenv('JIT_ANSWER')).to be_nil
   end
 end
