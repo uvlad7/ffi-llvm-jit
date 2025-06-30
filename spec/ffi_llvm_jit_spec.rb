@@ -56,4 +56,17 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(ffi_llvm_jit_lib.llvm_jit_strcmp('ABBA', 'abBA')).to be < 1
     expect(ffi_llvm_jit_lib.llvm_jit_strcasecmp('ABBA', 'abBA')).to be 0
   end
+
+  it 'handles unsigned values well' do
+    # LONG_MIN: -9223372036854775808, LONG_MAX: 9223372036854775807, ULONG_MAX: 18446744073709551615
+    # the second argument is actually a char **, but as pointer isn't
+    # supported, we use :string and abuse the fact that null pointer
+    # is supported both by the function and by the converter.
+    # Don't use it in real life code!
+    ffi_llvm_jit_lib.attach_function :strtoul, [:string, :string, :int], :ulong
+    ffi_llvm_jit_lib.attach_function :strtol, [:string, :string, :int], :long
+    ulong_max = (2 ** (FFI.find_type(:ulong).size * 8)) - 1
+    expect(ffi_llvm_jit_lib.llvm_jit_strtoul(ulong_max.to_s, nil, 0)).to eq ulong_max
+    expect(ffi_llvm_jit_lib.llvm_jit_strtol('-1', nil, 0)).to eq -1
+  end
 end

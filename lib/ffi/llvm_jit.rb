@@ -40,6 +40,7 @@ module FFI
         # uint, not uint32, because converters support platform-specific types
         int: LLVM.const_get("Int#{FFI.type_size(:int) * 8}"),
         uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
+        long: LLVM.const_get("Int#{FFI.type_size(:long) * 8}"),
         ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
       }.freeze
 
