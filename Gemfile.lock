@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    ffi_llvm_jit (0.1.0)
+    ffi-llvm-jit (0.1.0)
       ffi (~> 1.15)
       ruby-llvm (>= 14)
 
@@ -78,7 +78,7 @@ PLATFORMS
 
 DEPENDENCIES
   benchmark-ips (~> 2.14)
-  ffi_llvm_jit!
+  ffi-llvm-jit!
   pry (= 0.14.2)
   pry-byebug (= 3.10.1)
   rake (~> 13.0)
