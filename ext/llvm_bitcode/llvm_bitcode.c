@@ -1,16 +1,16 @@
 #include "llvm_bitcode.h"
 
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Call.c
-inline char * ffi_llvm_jit_value_to_string(VALUE arg) {
+__attribute__((always_inline)) char * ffi_llvm_jit_value_to_string(VALUE arg) {
     return NIL_P(arg) ? NULL : StringValueCStr(arg);
 }
 
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Types.c
-inline VALUE ffi_llvm_jit_uint_to_value(unsigned int arg) {
+__attribute__((always_inline)) VALUE ffi_llvm_jit_uint_to_value(unsigned int arg) {
     return UINT2NUM(arg);
 }
 
 // FFI.find_type(:size_t)
-inline VALUE ffi_llvm_jit_ulong_to_value(unsigned long arg) {
+__attribute__((always_inline)) VALUE ffi_llvm_jit_ulong_to_value(unsigned long arg) {
     return ULONG2NUM(arg);
 }

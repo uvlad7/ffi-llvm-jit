@@ -65,21 +65,21 @@ end
 
 # ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [x86_64-linux]
 # Warming up --------------------------------------
-#           strlen-ffi   565.948k i/100ms
-#          strlen-ruby     1.303M i/100ms
-#          strlen-cext     1.248M i/100ms
-#          ruby-direct     1.720M i/100ms
-#  strlen-ffi-llvm-jit     1.238M i/100ms
+#           strlen-ffi   574.246k i/100ms
+#          strlen-ruby     1.299M i/100ms
+#          strlen-cext     1.204M i/100ms
+#          ruby-direct     1.696M i/100ms
+#  strlen-ffi-llvm-jit     1.107M i/100ms
 # Calculating -------------------------------------
-#           strlen-ffi      5.676M (± 2.6%) i/s  (176.17 ns/i) -     28.863M in   5.088461s
-#          strlen-ruby     13.128M (± 2.3%) i/s   (76.18 ns/i) -     66.453M in   5.064791s
-#          strlen-cext     11.899M (± 4.9%) i/s   (84.04 ns/i) -     59.881M in   5.047425s
-#          ruby-direct     16.699M (± 6.4%) i/s   (59.89 ns/i) -     84.277M in   5.076964s
-#  strlen-ffi-llvm-jit     11.947M (± 2.4%) i/s   (83.70 ns/i) -     60.654M in   5.079950s
+#           strlen-ffi      5.633M (± 6.1%) i/s  (177.53 ns/i) -     28.138M in   5.020541s
+#          strlen-ruby     13.203M (± 2.7%) i/s   (75.74 ns/i) -     66.262M in   5.022705s
+#          strlen-cext     11.672M (± 4.6%) i/s   (85.68 ns/i) -     58.979M in   5.064773s
+#          ruby-direct     17.050M (± 1.3%) i/s   (58.65 ns/i) -     86.520M in   5.075277s
+#  strlen-ffi-llvm-jit     12.064M (± 1.2%) i/s   (82.89 ns/i) -     60.911M in   5.049621s
 
 # Comparison:
-#          ruby-direct: 16698670.4 i/s
-#          strlen-ruby: 13127528.3 i/s - 1.27x  slower
-#  strlen-ffi-llvm-jit: 11947139.9 i/s - 1.40x  slower
-#          strlen-cext: 11898508.3 i/s - 1.40x  slower
-#           strlen-ffi:  5676267.8 i/s - 2.94x  slower
+#          ruby-direct: 17050160.9 i/s
+#          strlen-ruby: 13202524.9 i/s - 1.29x  slower
+#  strlen-ffi-llvm-jit: 12064294.8 i/s - 1.41x  slower
+#          strlen-cext: 11671739.9 i/s - 1.46x  slower
+#           strlen-ffi:  5632971.7 i/s - 3.03x  slower
