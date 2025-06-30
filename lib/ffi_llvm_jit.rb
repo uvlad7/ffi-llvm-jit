@@ -27,8 +27,8 @@ module FfiLlvmJit
   module Library
     include ::FFI::Library
 
-    LLVM.init_jit
     FFI_LLVM_JIT_MOD = LLVM::Module.parse_bitcode(File.expand_path("ffi_llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__))
+    LLVM.init_jit
     FFI_LLVM_JIT_ENG = LLVM::JITCompiler.new(FFI_LLVM_JIT_MOD, opt_level: 3)
     # FFI_LLVM_JIT_ENG.dispose is never called
     # FFI_LLVM_JIT_MOD.dump
@@ -52,43 +52,57 @@ module FfiLlvmJit
         break fn if fn
       end
 
-      fn_type = LLVM.Function([LLVM.Pointer], LLVM.const_get("Int#{FFI.type_size(:size_t) * 8}"))
+      p function.address
+
+      # string -> LLVM.Pointer; size_t -> LLVM::Int64
+      fn_type = LLVM.Function([LLVM.Pointer(LLVM::Int8)], LLVM.const_get("Int#{FFI.type_size(:size_t) * 8}"))
       fn_ptr_type = LLVM.Pointer(fn_type)
-      func_ptr = FFI_LLVM_JIT_MOD.globals.add(POINTER, :"#{func}_ptr") do |var|
+      # Unnamed, can change '' into :"#{func}_ptr" for debugging, but unnamed is better to prevent name clashes
+      func_ptr = FFI_LLVM_JIT_MOD.globals.add(POINTER, '') do |var|
         var.linkage = :private
         var.global_constant = true
         var.unnamed_addr = true
         var.initializer = POINTER.from_i(function.address)
       end
 
-      rb_func = FFI_LLVM_JIT_MOD.functions.add(:"rb_#{name}", [VALUE], VALUE) do |llvm_function, param|
+      rb_func = FFI_LLVM_JIT_MOD.functions.add(:"rb_#{name}", [VALUE, VALUE], VALUE) do |llvm_function, rb_self, param|
         llvm_function.basic_blocks.append('entry').build do |b|
           converted_param = b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string'], param)
           func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
-          res = b.call2(fn_type, func_ptr_val, converted_param)
+          # Debug
+          # b.ret b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_ulong_to_value'], func_ptr_val)
+          # b.ret func_ptr_val
+
+          res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), converted_param)
           b.ret b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_ulong_to_value'], res)
         end
       end
 
-      # TEST
+      attach_llvm_jit_function(name.to_s, FFI_LLVM_JIT_ENG.function_address(rb_func.name), args.size)
 
-      require 'fiddle'
-      str = "Hello"
-      p FFI_LLVM_JIT_ENG.function_address(rb_func.name)
-      res = FFI_LLVM_JIT_ENG.run_function(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string'], Fiddle.dlwrap(str))
-      ptr = res.to_value_ptr
-      res.dispose
-      puts ptr.read_string
+      # TEST
+      # require 'fiddle'
+      # str = 'Hello'
+      # p FFI_LLVM_JIT_ENG.function_address(rb_func.name)
+      # res = FFI_LLVM_JIT_ENG.run_function(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string'], Fiddle.dlwrap(str))
+      # ptr = res.to_value_ptr
+      # res.dispose
+      # puts ptr.read_string
+      # p FFI_LLVM_JIT_ENG.run_function(rb_func, Fiddle.dlwrap(self), Fiddle.dlwrap(str)).to_i
     end
   end
 
   module Test
     extend Library
 
-    ffi_lib ::FFI::Library::LIBC
+    # ffi_lib ::FFI::Library::LIBC
+    ffi_lib ::FFI::CURRENT_PROCESS
 
-    attach_function :strlen, :strlen, [:string], :size_t
+    attach_function :ffi_llvm_jit_strlen, :ffi_llvm_jit_strlen, [:string], :size_t
   end
+
+  str = "Hello from FfiLlvmJit!"
+  puts "strlen of #{str.inspect} is #{Test.ffi_llvm_jit_strlen(str)}"
 
   # Your code goes here...
 end
