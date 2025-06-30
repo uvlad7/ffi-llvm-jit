@@ -41,6 +41,10 @@ Gem::Specification.new do |spec|
 
   spec.add_development_dependency "pry", "0.14.2"
 
+  spec.add_development_dependency 'benchmark-ips', '~> 2.14'
+  spec.add_development_dependency 'strlen', '~> 1.0'
+  spec.add_development_dependency 'ffi', '~> 1.15'
+
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
 end

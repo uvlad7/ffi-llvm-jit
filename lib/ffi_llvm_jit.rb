@@ -75,17 +75,5 @@ module FfiLlvmJit
     end
   end
 
-  module Test
-    extend Library
-
-    ffi_lib ::FFI::Library::LIBC
-
-    attach_function :ffi_llvm_jit_strlen, :strlen, [:string], :size_t
-  end
-
-  str = "Hello from FfiLlvmJit!"
-  puts "strlen of #{str.inspect} is #{Test.ffi_llvm_jit_strlen(str)}"
-  # Test.ffi_llvm_jit_strlen(nil) - crashes just like a regular FFI
-
   # Your code goes here...
 end
