@@ -15,6 +15,6 @@ RSpec.describe FFI::LLVMJIT do
   end
 
   it 'calculates strlen' do
-    expect(ffi_llvm_jit_lib.strlen('Hello from FFI LLVM JIT!')).to eq 24
+    expect(ffi_llvm_jit_lib.llvm_jit_strlen('Hello from FFI LLVM JIT!')).to eq 24
   end
 end

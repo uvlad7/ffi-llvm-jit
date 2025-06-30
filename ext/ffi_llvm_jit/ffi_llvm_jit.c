@@ -13,7 +13,7 @@ VALUE rb_mFFILLVMJITLibrary;
  * Attach a Function to the Module +m+ as +name+.
  */
 static VALUE
-attach_llvm_jit_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc_val)
+attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc_val)
 {
   const char * name = StringValueCStr(name_val);
   VALUE (*func)(ANYARGS);
@@ -44,5 +44,5 @@ Init_ffi_llvm_jit(void)
   rb_mFFI = rb_define_module("FFI");
   rb_mFFILLVMJIT = rb_define_module_under(rb_mFFI, "LLVMJIT");
   rb_mFFILLVMJITLibrary = rb_define_module_under(rb_mFFILLVMJIT, "Library");
-  rb_define_method(rb_mFFILLVMJITLibrary, "attach_llvm_jit_function", attach_llvm_jit_function, 3);
+  rb_define_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 3);
 }

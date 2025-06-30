@@ -26,50 +26,117 @@ module FFI
       # LLVM_ENG.dispose is never called
       # LLVM_MOD.dump
 
-      #  # Native integer type
+      # TODO: LLVM args
+      # FFI::Type::Builtin to LLVM types
+      # FFI::NativeType.constants
+      # https://github.com/ffi/ffi/blob/master/ext/ffi_c/Type.c#L410
+      SUPPORTED_TO_NATIVE = {
+        FFI::TYPE_STRING => :string,
+      }.freeze
+
+      SUPPORTED_FROM_NATIVE = {
+        FFI::TYPE_UINT32 => :uint,
+        FFI::TYPE_ULONG => :ulong,
+      }.freeze
+
+      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+
+      # @note Return type doesn't match the original method, but it's usually not used
+      def attach_function(name, func, args, returns = nil, options = nil)
+        mname, a2, a3, a4, a5 = name, func, args, returns, options
+        cname, arg_types, ret_type, opts = (a4 && (a2.is_a?(String) || a2.is_a?(Symbol))) ? [a2, a3, a4, a5] : [mname.to_s, a2, a3, a4]
+
+        # Convert :foo to the native type
+        arg_types = arg_types.map { |e| find_type(e) }
+        options = {
+          :convention => ffi_convention,
+          :type_map => defined?(@ffi_typedefs) ? @ffi_typedefs : nil,
+          :blocking => defined?(@blocking) && @blocking,
+          :enums => defined?(@ffi_enums) ? @ffi_enums : nil,
+        }
+
+        @blocking = false
+        options.merge!(opts) if opts && opts.is_a?(Hash)
+
+        # TODO: support stdcall convention
+        # TODO: support call_without_gvl
+        # Variadic functions are not supported; we could support known arguments,
+        # but we'd still need to know use libffi to create varargs
+
+        ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
+        arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
+        if options[:convention] != :default || options[:type_map] != nil ||
+           options[:blocking] || options[:enums] || ret_type_name == nil || arg_types.any?(&:nil?)
+
+          return super(mname, cname, arg_types, ret_type, options)
+        end
+
+        function_handle = ffi_libraries.find do |lib|
+          fn = nil
+          begin
+            function_names(func, arg_types).find do |fname|
+              fn = lib.find_function(fname)
+            end
+          rescue LoadError
+            # Ignored
+          end
+          break fn if fn
+        end
+        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map { |lib| lib.name }) unless function_handle
+
+        attach_llvm_jit_function(mname, function_handle.address, arg_type_names, ret_type_name)
+      end
+
+      private
+
+      # # Native integer type
       # bits = FFI.type_size(:int) * 8
       # ::LLVM::Int = const_get("Int#{bits}")
       # @LLVMinst inttoptr
       POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = POINTER
+      LLVM_TYPES = {
+        string: LLVM.Pointer(LLVM::Int8),
+        uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
+        ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
+      }.freeze
 
-      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+      private_constant :POINTER, :VALUE
 
-      # TODO: Support all orig params
-      def attach_function(name, func, args, _returns)
-        arg_types = args.map { |e| find_type(e) }
-        function = ffi_libraries.find do |lib|
-          fn = nil
-          function_names(func, arg_types).find do |fname|
-            fn = lib.find_function(fname)
-          end
-          break fn if fn
-        end
-
+      def attach_llvm_jit_function(rb_name, c_address, arg_type_names, ret_type_name)
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
-        fn_type = LLVM.Function([LLVM.Pointer(LLVM::Int8)], LLVM.const_get("Int#{FFI.type_size(:size_t) * 8}"))
+        fn_type = LLVM.Function(
+          arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] },
+          LLVM_TYPES[ret_type_name],
+        )
         fn_ptr_type = LLVM.Pointer(fn_type)
-        # Unnamed, can change '' into :"#{func}_ptr" for debugging, but unnamed is better to prevent name clashes
+        # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
         func_ptr = LLVM_MOD.globals.add(POINTER, '') do |var|
           var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
-          var.initializer = POINTER.from_i(function.address)
+          var.initializer = POINTER.from_i(c_address)
         end
 
-        rb_func = LLVM_MOD.functions.add(:"rb_#{name}", [VALUE, VALUE], VALUE) do |llvm_function, _rb_self, param|
+        rb_func = LLVM_MOD.functions.add(
+          :"rb_llvm_jit_wrap_#{rb_name}", [VALUE] * (arg_type_names.size + 1), VALUE,
+        ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |b|
-            converted_param = b.call(LLVM_MOD.functions['ffi_llvm_jit_value_to_string'], param)
+            converted_params = arg_type_names.zip(params).map do |arg_type, param|
+              b.call(LLVM_MOD.functions["ffi_llvm_jit_value_to_#{arg_type}"], param)
+            end
+
             func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
-            res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), converted_param)
-            b.ret b.call(LLVM_MOD.functions['ffi_llvm_jit_ulong_to_value'], res)
+            res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), *converted_params)
+
+            b.ret b.call(LLVM_MOD.functions["ffi_llvm_jit_#{ret_type_name}_to_value"], res)
           end
         end
 
-        jit_name = "llvm_jit_#{name}"
-        attach_llvm_jit_function(jit_name, LLVM_ENG.function_address(rb_func.name), args.size)
-        singleton_class.alias_method name, jit_name
-        alias_method name, jit_name
+        jit_name = "llvm_jit_#{rb_name}"
+        attach_rb_wrap_function(jit_name, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
+        singleton_class.alias_method rb_name, jit_name
+        alias_method rb_name, jit_name
       end
 
       # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
