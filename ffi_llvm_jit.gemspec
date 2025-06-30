@@ -32,7 +32,7 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
-  spec.extensions = ["ext/ffi_llvm_jit/extconf.rb"]
+  spec.extensions = ["ext/llvm_bitcode/extconf.rb", "ext/ffi_llvm_jit/extconf.rb"]
 
   # Only because its major version matches required llvm version and I have llvm-17 installed
   spec.add_dependency "ruby-llvm", "~> 17"

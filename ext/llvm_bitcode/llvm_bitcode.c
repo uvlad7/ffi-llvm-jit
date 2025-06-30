@@ -1,4 +1,4 @@
-#include "ffi_llvm_jit.h"
+#include "llvm_bitcode.h"
 
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Call.c
 char * ffi_llvm_jit_value_to_string(VALUE arg) {

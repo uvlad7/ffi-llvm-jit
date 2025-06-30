@@ -13,4 +13,4 @@ $CFLAGS << " -emit-llvm -c "
 
 # MakeMakefile::COMPILE_C = config_string('COMPILE_C') || '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG) -c $(CSRCFLAG)$<'
 
-create_makefile("ffi_llvm_jit/ffi_llvm_jit")
+create_makefile("ffi_llvm_jit/llvm_bitcode")

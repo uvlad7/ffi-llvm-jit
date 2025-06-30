@@ -27,7 +27,7 @@ module FfiLlvmJit
     include ::FFI::Library
 
     LLVM.init_jit
-    FFI_LLVM_JIT_MOD = LLVM::Module.parse_bitcode(File.expand_path("ffi_llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__))
+    FFI_LLVM_JIT_MOD = LLVM::Module.parse_bitcode(File.expand_path("ffi_llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__))
     FFI_LLVM_JIT_ENG = LLVM::JITCompiler.new(FFI_LLVM_JIT_MOD, opt_level: 3)
     # FFI_LLVM_JIT_ENG.dispose is never called
     # FFI_LLVM_JIT_MOD.dump
