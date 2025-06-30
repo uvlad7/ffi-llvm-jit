@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'ffi_llvm_jit/version'
+require_relative 'ffi_llvm_jit/ffi_llvm_jit'
 
 require 'llvm/core'
 require 'llvm/execution_engine'

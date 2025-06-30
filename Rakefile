@@ -15,8 +15,11 @@ task build: :compile
 
 GEMSPEC = Gem::Specification.load("ffi_llvm_jit.gemspec")
 
-Rake::ExtensionTask.new("ffi_llvm_jit", GEMSPEC) do |ext|
-  ext.lib_dir = "lib/ffi_llvm_jit"
+GEMSPEC.extensions.each do |extension|
+  name = extension[%r{ext/(.*)/extconf.rb}, 1]
+  Rake::ExtensionTask.new(name, GEMSPEC) do |ext|
+    ext.lib_dir = "lib/ffi_llvm_jit"
+  end
 end
 
 task default: %i[clobber compile spec rubocop]
