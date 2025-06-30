@@ -23,8 +23,74 @@ require 'llvm/execution_engine'
 module FfiLlvmJit
   class Error < StandardError; end
 
-  @ffi_llvm_jit = LLVM::Module.parse_bitcode(File.expand_path("ffi_llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__))
-  # @ffi_llvm_jit.functions['ffi_llvm_jit_convert_string']
+  module Library
+    include ::FFI::Library
+
+    FFI_LLVM_JIT_MOD = LLVM::Module.parse_bitcode(File.expand_path("ffi_llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__))
+    #  # Native integer type
+    # bits = FFI.type_size(:int) * 8
+    # ::LLVM::Int = const_get("Int#{bits}")
+    # @LLVMinst inttoptr
+    POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
+    VALUE = POINTER
+    # FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_convert_string']
+
+    # TODO: Support all orig params
+    def attach_function(name, func, args, returns)
+      arg_types = args.map { |e| find_type(e) }
+      function = ffi_libraries.find do |lib|
+        fn = nil
+        function_names(func, arg_types).find do |fname|
+          fn = lib.find_function(fname)
+        end
+        break fn if fn
+      end
+      LLVM.init_jit
+      # FFI_LLVM_JIT_MOD.dump
+      engine = LLVM::JITCompiler.new(FFI_LLVM_JIT_MOD, opt_level: 3)
+      p engine.function_address("rb_#{name}")
+
+      p function.address
+      fn_type = LLVM.Function([LLVM.Pointer], LLVM.const_get("Int#{FFI.type_size(:size_t) * 8}"))
+      fn_ptr_type = LLVM.Pointer(fn_type)
+      func_ptr = FFI_LLVM_JIT_MOD.globals.add(POINTER, :"#{func}_ptr") do |var|
+        var.linkage = :private
+        var.global_constant = true
+        var.unnamed_addr = true
+        var.initializer = POINTER.from_i(function.address)
+      end
+
+      rb_func = FFI_LLVM_JIT_MOD.functions.add(:"rb_#{name}", [VALUE], VALUE) do |llvm_function, param|
+        llvm_function.basic_blocks.append('entry').build do |b|
+          converted_param = b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_convert_string'], param)
+          func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
+          res = b.call2(fn_type, func_ptr_val, converted_param)
+          b.ret res
+        end
+      end
+
+      # TEST
+
+      require 'fiddle'
+      str = 'hello'
+      p engine.function_address("rb_#{name}")
+
+      p engine.function_address(rb_func.name)
+      res = engine.run_function(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_convert_string'], Fiddle.dlwrap(str))
+      ptr = res.to_value_ptr
+      res.dispose
+      puts ptr.read_string
+      engine.dispose
+    end
+  end
+
+  module Test
+    extend Library
+
+    ffi_lib ::FFI::Library::LIBC
+
+    attach_function :strlen, :strlen, [:string], :size_t
+  end
 
   # Your code goes here...
 end

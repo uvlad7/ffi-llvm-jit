@@ -37,6 +37,10 @@ Gem::Specification.new do |spec|
   # Only because its major version matches required llvm version and I have llvm-17 installed
   spec.add_dependency "ruby-llvm", "~> 17"
 
+  spec.add_development_dependency "pry-byebug", "3.10.1"
+
+  spec.add_development_dependency "pry", "0.14.2"
+
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
 end

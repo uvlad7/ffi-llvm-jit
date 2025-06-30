@@ -8,17 +8,26 @@ GEM
   remote: https://rubygems.org/
   specs:
     ast (2.4.3)
+    byebug (11.1.3)
+    coderay (1.1.3)
     diff-lcs (1.5.1)
     ffi (1.17.2)
     ffi (1.17.2-x86_64-linux-gnu)
     json (2.12.2)
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
+    method_source (1.1.0)
     parallel (1.27.0)
     parser (3.3.8.0)
       ast (~> 2.4.1)
       racc
     prism (1.4.0)
+    pry (0.14.2)
+      coderay (~> 1.1)
+      method_source (~> 1.0)
+    pry-byebug (3.10.1)
+      byebug (~> 11.0)
+      pry (>= 0.13, < 0.15)
     racc (1.8.1)
     rainbow (3.1.1)
     rake (13.3.0)
@@ -66,6 +75,8 @@ PLATFORMS
 
 DEPENDENCIES
   ffi_llvm_jit!
+  pry (= 0.14.2)
+  pry-byebug (= 3.10.1)
   rake (~> 13.0)
   rake-compiler
   rspec (~> 3.0)
