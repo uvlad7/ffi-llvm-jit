@@ -23,6 +23,9 @@ module FFI
       )
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
+
+      private_constant :LLVM_MOD, :LLVM_ENG
+
       # LLVM_ENG.dispose is never called
       # LLVM_MOD.dump
 
@@ -114,6 +117,8 @@ module FFI
       private
 
       def attach_llvm_jit_function(rb_name, c_address, arg_type_names, ret_type_name)
+        # AFAIK name doesn't need to be unique
+        llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
         fn_type = LLVM.Function(
           arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] },
@@ -121,7 +126,7 @@ module FFI
         )
         fn_ptr_type = LLVM.Pointer(fn_type)
         # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
-        func_ptr = LLVM_MOD.globals.add(POINTER, '') do |var|
+        func_ptr = llvm_mod.globals.add(POINTER, '') do |var|
           var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
@@ -132,7 +137,7 @@ module FFI
         # update rb_func.name=, function_address is still zero
         # Upd: It happens if functions are the same even though their names are different
 
-        rb_func = LLVM_MOD.functions.add(
+        rb_func = llvm_mod.functions.add(
           :"rb_llvm_jit_wrap_#{rb_name}", [VALUE] * (arg_type_names.size + 1), VALUE,
         ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |b|
@@ -147,9 +152,7 @@ module FFI
           end
         end
 
-        # Force update
-        LLVM_ENG.modules.delete(LLVM_MOD)
-        LLVM_ENG.modules.add(LLVM_MOD)
+        LLVM_ENG.modules.add(llvm_mod)
 
         # rb_func.name isn't always the same as rb_name, in case of name clashes
         # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
