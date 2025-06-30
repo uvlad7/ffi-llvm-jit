@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
+# rubocop:disable all
 
 # https://github.com/rubygems/rubygems/issues/8754
 module Gem
@@ -24,3 +25,5 @@ require 'ffi_llvm_jit'
 
 require 'irb'
 IRB.start(__FILE__)
+
+# rubocop:enable all

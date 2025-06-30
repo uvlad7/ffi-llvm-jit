@@ -7,7 +7,6 @@ require 'llvm/execution_engine'
 require_relative 'ffi_llvm_jit/version'
 require_relative 'ffi_llvm_jit/ffi_llvm_jit'
 
-
 # https://llvm.org/doxygen/group__LLVMCCoreModule.html
 # https://llvm.org/doxygen/group__LLVMCBitReader.html
 # https://llvm.org/doxygen/group__LLVMCCoreMemoryBuffers.html
@@ -16,10 +15,13 @@ require_relative 'ffi_llvm_jit/ffi_llvm_jit'
 module FfiLlvmJit
   class Error < StandardError; end
 
+  # Extension to FFI::Library to support JIT compilation using LLVM
   module Library
     include ::FFI::Library
 
-    FFI_LLVM_JIT_MOD = LLVM::Module.parse_bitcode(File.expand_path("ffi_llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__))
+    FFI_LLVM_JIT_MOD = LLVM::Module.parse_bitcode(
+      File.expand_path("ffi_llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__)
+    )
     LLVM.init_jit
     FFI_LLVM_JIT_ENG = LLVM::JITCompiler.new(FFI_LLVM_JIT_MOD, opt_level: 3)
     # FFI_LLVM_JIT_ENG.dispose is never called
@@ -32,8 +34,10 @@ module FfiLlvmJit
     POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
     VALUE = POINTER
 
+    # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+
     # TODO: Support all orig params
-    def attach_function(name, func, args, returns)
+    def attach_function(name, func, args, _returns)
       arg_types = args.map { |e| find_type(e) }
       function = ffi_libraries.find do |lib|
         fn = nil
@@ -54,7 +58,7 @@ module FfiLlvmJit
         var.initializer = POINTER.from_i(function.address)
       end
 
-      rb_func = FFI_LLVM_JIT_MOD.functions.add(:"rb_#{name}", [VALUE, VALUE], VALUE) do |llvm_function, rb_self, param|
+      rb_func = FFI_LLVM_JIT_MOD.functions.add(:"rb_#{name}", [VALUE, VALUE], VALUE) do |llvm_function, _rb_self, param|
         llvm_function.basic_blocks.append('entry').build do |b|
           converted_param = b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string'], param)
           func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
@@ -65,8 +69,10 @@ module FfiLlvmJit
 
       jit_name = "llvm_jit_#{name}"
       attach_llvm_jit_function(jit_name, FFI_LLVM_JIT_ENG.function_address(rb_func.name), args.size)
-      self.singleton_class.alias_method name, jit_name
+      singleton_class.alias_method name, jit_name
       alias_method name, jit_name
     end
+
+    # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
   end
 end

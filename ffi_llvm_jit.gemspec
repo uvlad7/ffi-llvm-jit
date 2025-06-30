@@ -11,7 +11,8 @@ Gem::Specification.new do |spec|
   spec.email = ['uvlad7@gmail.com']
 
   spec.summary = 'Ruby FFI JIT using LLVM'
-  spec.description = 'Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions, works only on MRI'
+  spec.description = 'Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. ' \
+                     'Works only on MRI'
   spec.homepage = 'https://github.com/uvlad7/ffi-llvm-jit'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 2.3.8'
@@ -38,8 +39,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'ffi', '~> 1.15'
   spec.add_dependency 'ruby-llvm', '>= 14'
 
-  spec.add_development_dependency 'pry-byebug', '3.10.1'
   spec.add_development_dependency 'pry', '0.14.2'
+  spec.add_development_dependency 'pry-byebug', '3.10.1'
 
   spec.add_development_dependency 'benchmark-ips', '~> 2.14'
   spec.add_development_dependency 'strlen', '~> 1.0'
@@ -48,4 +49,12 @@ Gem::Specification.new do |spec|
 
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
+
+  spec.add_development_dependency 'rake', '~> 13.0'
+
+  spec.add_development_dependency 'rake-compiler'
+
+  spec.add_development_dependency 'rspec', '~> 3.0'
+
+  spec.add_development_dependency 'rubocop', '~> 1.21'
 end

@@ -27,6 +27,7 @@ task spec: :compile
 task default: %i[clobber compile spec rubocop]
 
 # Similar to https://gist.github.com/tenderworks/f4cbb60f2c0dc3ab334eb73fec36f702
+# rubocop:disable Metrics/BlockLength, Style/Documentation, Lint/ConstantDefinitionInBlock, Naming/MethodParameterName
 task bench: :compile do
   require 'ffi'
   require 'benchmark/ips'
@@ -64,6 +65,7 @@ task bench: :compile do
     x.compare!
   end
 end
+# rubocop:enable Metrics/BlockLength, Style/Documentation, Lint/ConstantDefinitionInBlock, Naming/MethodParameterName
 
 # ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [x86_64-linux]
 # Warming up --------------------------------------
