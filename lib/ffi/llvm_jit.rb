@@ -58,7 +58,6 @@ module FFI
                                              [mname.to_s, a2, a3,
                                               a4]
                                            end
-
         # Convert :foo to the native type
         arg_types = arg_types.map { |e| find_type(e) }
         options = {
@@ -87,7 +86,7 @@ module FFI
         function_handle = ffi_libraries.find do |lib|
           fn = nil
           begin
-            function_names(func, arg_types).find do |fname|
+            function_names(cname, arg_types).find do |fname|
               fn = lib.find_function(fname)
             end
           rescue LoadError
