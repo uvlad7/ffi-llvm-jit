@@ -68,7 +68,7 @@ module FFI
         @blocking = false
         options.merge!(opts) if opts.is_a?(Hash)
 
-        # TODO: support stdcall convention
+        # TODO: support stdcall convention (rb_func.call_conv=)
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
         # but we'd still need to know use libffi to create varargs
@@ -128,6 +128,10 @@ module FFI
           var.initializer = POINTER.from_i(c_address)
         end
 
+        # Something is wrong in case of name collizion; and even though you can
+        # update rb_func.name=, function_address is still zero
+        # Upd: It happens if functions are the same even though their names are different
+
         rb_func = LLVM_MOD.functions.add(
           :"rb_llvm_jit_wrap_#{rb_name}", [VALUE] * (arg_type_names.size + 1), VALUE,
         ) do |llvm_function, _rb_self, *params|
@@ -143,7 +147,15 @@ module FFI
           end
         end
 
+        # Force update
+        LLVM_ENG.modules.delete(LLVM_MOD)
+        LLVM_ENG.modules.add(LLVM_MOD)
+
+        # rb_func.name isn't always the same as rb_name, in case of name clashes
+        # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
+
         jit_name = "llvm_jit_#{rb_name}"
+        # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
         attach_rb_wrap_function(jit_name, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
         singleton_class.alias_method rb_name, jit_name
         alias_method rb_name, jit_name
