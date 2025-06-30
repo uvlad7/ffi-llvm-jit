@@ -37,13 +37,6 @@ attach_llvm_jit_function(VALUE module, VALUE name_val, VALUE func_val, VALUE arg
   return module;
 }
 
-#include <string.h>
-RUBY_FUNC_EXPORTED size_t ffi_llvm_jit_strlen(const char *s) {
-  printf("ffi_llvm_jit_strlen: %p\n", (void*)&s);
-  printf("ffi_llvm_jit_strlen: %s\n", s);
-  return strlen(s);
-}
-
 RUBY_FUNC_EXPORTED void
 Init_ffi_llvm_jit(void)
 {

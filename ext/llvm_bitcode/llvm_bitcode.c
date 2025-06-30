@@ -2,8 +2,6 @@
 
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Call.c
 char * ffi_llvm_jit_value_to_string(VALUE arg) {
-    VALUE v = rb_sprintf("%+" PRIsVALUE, arg);
-    printf("ffi_llvm_jit_value_to_string: %s\n", StringValueCStr(v));
     return NIL_P(arg) ? NULL : StringValueCStr(arg);
 }
 
@@ -14,6 +12,5 @@ VALUE ffi_llvm_jit_uint_to_value(unsigned int arg) {
 
 // FFI.find_type(:size_t)
 VALUE ffi_llvm_jit_ulong_to_value(unsigned long arg) {
-    printf("ffi_llvm_jit_ulong_to_value: %lu\n", arg);
     return ULONG2NUM(arg);
 }

@@ -39,7 +39,6 @@ module FfiLlvmJit
     # @LLVMinst inttoptr
     POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
     VALUE = POINTER
-    # FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string']
 
     # TODO: Support all orig params
     def attach_function(name, func, args, returns)
@@ -51,8 +50,6 @@ module FfiLlvmJit
         end
         break fn if fn
       end
-
-      p function.address
 
       # string -> LLVM.Pointer; size_t -> LLVM::Int64
       fn_type = LLVM.Function([LLVM.Pointer(LLVM::Int8)], LLVM.const_get("Int#{FFI.type_size(:size_t) * 8}"))
@@ -69,40 +66,26 @@ module FfiLlvmJit
         llvm_function.basic_blocks.append('entry').build do |b|
           converted_param = b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string'], param)
           func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
-          # Debug
-          # b.ret b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_ulong_to_value'], func_ptr_val)
-          # b.ret func_ptr_val
-
           res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), converted_param)
           b.ret b.call(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_ulong_to_value'], res)
         end
       end
 
       attach_llvm_jit_function(name.to_s, FFI_LLVM_JIT_ENG.function_address(rb_func.name), args.size)
-
-      # TEST
-      # require 'fiddle'
-      # str = 'Hello'
-      # p FFI_LLVM_JIT_ENG.function_address(rb_func.name)
-      # res = FFI_LLVM_JIT_ENG.run_function(FFI_LLVM_JIT_MOD.functions['ffi_llvm_jit_value_to_string'], Fiddle.dlwrap(str))
-      # ptr = res.to_value_ptr
-      # res.dispose
-      # puts ptr.read_string
-      # p FFI_LLVM_JIT_ENG.run_function(rb_func, Fiddle.dlwrap(self), Fiddle.dlwrap(str)).to_i
     end
   end
 
   module Test
     extend Library
 
-    # ffi_lib ::FFI::Library::LIBC
-    ffi_lib ::FFI::CURRENT_PROCESS
+    ffi_lib ::FFI::Library::LIBC
 
-    attach_function :ffi_llvm_jit_strlen, :ffi_llvm_jit_strlen, [:string], :size_t
+    attach_function :ffi_llvm_jit_strlen, :strlen, [:string], :size_t
   end
 
   str = "Hello from FfiLlvmJit!"
   puts "strlen of #{str.inspect} is #{Test.ffi_llvm_jit_strlen(str)}"
+  # Test.ffi_llvm_jit_strlen(nil) - crashes just like a regular FFI
 
   # Your code goes here...
 end
