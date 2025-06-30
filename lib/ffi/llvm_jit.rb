@@ -19,7 +19,7 @@ module FFI
       include ::FFI::Library
 
       LLVM_MOD = LLVM::Module.parse_bitcode(
-        File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__)
+        File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
@@ -39,24 +39,34 @@ module FFI
         FFI::TYPE_ULONG => :ulong,
       }.freeze
 
-      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # @note Return type doesn't match the original method, but it's usually not used
       def attach_function(name, func, args, returns = nil, options = nil)
-        mname, a2, a3, a4, a5 = name, func, args, returns, options
-        cname, arg_types, ret_type, opts = (a4 && (a2.is_a?(String) || a2.is_a?(Symbol))) ? [a2, a3, a4, a5] : [mname.to_s, a2, a3, a4]
+        mname = name
+        a2 = func
+        a3 = args
+        a4 = returns
+        a5 = options
+        cname, arg_types, ret_type, opts = if a4 && (a2.is_a?(String) || a2.is_a?(Symbol))
+                                             [a2, a3, a4,
+                                              a5]
+                                           else
+                                             [mname.to_s, a2, a3,
+                                              a4]
+                                           end
 
         # Convert :foo to the native type
         arg_types = arg_types.map { |e| find_type(e) }
         options = {
-          :convention => ffi_convention,
-          :type_map => defined?(@ffi_typedefs) ? @ffi_typedefs : nil,
-          :blocking => defined?(@blocking) && @blocking,
-          :enums => defined?(@ffi_enums) ? @ffi_enums : nil,
+          convention: ffi_convention,
+          type_map: defined?(@ffi_typedefs) ? @ffi_typedefs : nil,
+          blocking: defined?(@blocking) && @blocking,
+          enums: defined?(@ffi_enums) ? @ffi_enums : nil,
         }
 
         @blocking = false
-        options.merge!(opts) if opts && opts.is_a?(Hash)
+        options.merge!(opts) if opts.is_a?(Hash)
 
         # TODO: support stdcall convention
         # TODO: support call_without_gvl
@@ -65,8 +75,8 @@ module FFI
 
         ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
-        if options[:convention] != :default || options[:type_map] != nil ||
-           options[:blocking] || options[:enums] || ret_type_name == nil || arg_types.any?(&:nil?)
+        if options[:convention] != :default || !options[:type_map].nil? ||
+           options[:blocking] || options[:enums] || ret_type_name.nil? || arg_types.any?(&:nil?)
 
           return super(mname, cname, arg_types, ret_type, options)
         end
@@ -82,12 +92,10 @@ module FFI
           end
           break fn if fn
         end
-        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map { |lib| lib.name }) unless function_handle
+        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name)) unless function_handle
 
         attach_llvm_jit_function(mname, function_handle.address, arg_type_names, ret_type_name)
       end
-
-      private
 
       # # Native integer type
       # bits = FFI.type_size(:int) * 8
@@ -101,7 +109,9 @@ module FFI
         ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
       }.freeze
 
-      private_constant :POINTER, :VALUE
+      private_constant :POINTER, :VALUE, :LLVM_TYPES
+
+      private
 
       def attach_llvm_jit_function(rb_name, c_address, arg_type_names, ret_type_name)
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
@@ -139,7 +149,7 @@ module FFI
         alias_method rb_name, jit_name
       end
 
-      # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     end
   end
 end

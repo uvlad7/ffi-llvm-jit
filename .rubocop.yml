@@ -17,3 +17,9 @@ Gemspec/RequireMFA:
 
 Style/TrailingCommaInArrayLiteral:
   EnforcedStyleForMultiline: diff_comma
+
+Style/TrailingCommaInHashLiteral:
+  EnforcedStyleForMultiline: diff_comma
+
+Style/TrailingCommaInArguments:
+  EnforcedStyleForMultiline: consistent_comma
