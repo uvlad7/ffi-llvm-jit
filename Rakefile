@@ -13,12 +13,12 @@ require 'rake/extensiontask'
 
 task build: :compile
 
-GEMSPEC = Gem::Specification.load('ffi_llvm_jit.gemspec')
+GEMSPEC = Gem::Specification.load('ffi-llvm-jit.gemspec')
 
 GEMSPEC.extensions.each do |extension|
   name = extension[%r{ext/(.*)/extconf.rb}, 1]
   Rake::ExtensionTask.new(name, GEMSPEC) do |ext|
-    ext.lib_dir = 'lib/ffi_llvm_jit'
+    ext.lib_dir = 'lib/ffi/llvm_jit'
   end
 end
 
@@ -32,7 +32,7 @@ task bench: :compile do
   require 'ffi'
   require 'benchmark/ips'
   require 'strlen'
-  require 'ffi_llvm_jit'
+  require 'ffi/llvm_jit'
 
   module A
     extend FFI::Library
@@ -47,7 +47,7 @@ task bench: :compile do
   end
 
   module C
-    extend FfiLlvmJit::Library
+    extend FFI::LLVMJIT::Library
 
     ffi_lib ::FFI::Library::LIBC
 

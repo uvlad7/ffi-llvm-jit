@@ -1,7 +1,8 @@
 #include "ffi_llvm_jit.h"
 
-VALUE rb_mFfiLlvmJit;
-VALUE rb_mFfiLlvmJitLibrary;
+VALUE rb_mFFI;
+VALUE rb_mFFILLVMJIT;
+VALUE rb_mFFILLVMJITLibrary;
 
 // https://github.com/ffi/ffi/blob/master/ext/ffi_c/Function.c
 /*
@@ -40,7 +41,8 @@ attach_llvm_jit_function(VALUE module, VALUE name_val, VALUE func_val, VALUE arg
 RUBY_FUNC_EXPORTED void
 Init_ffi_llvm_jit(void)
 {
-  rb_mFfiLlvmJit = rb_define_module("FfiLlvmJit");
-  rb_mFfiLlvmJitLibrary = rb_define_module_under(rb_mFfiLlvmJit, "Library");
-  rb_define_method(rb_mFfiLlvmJitLibrary, "attach_llvm_jit_function", attach_llvm_jit_function, 3);
+  rb_mFFI = rb_define_module("FFI");
+  rb_mFFILLVMJIT = rb_define_module_under(rb_mFFI, "LLVMJIT");
+  rb_mFFILLVMJITLibrary = rb_define_module_under(rb_mFFILLVMJIT, "Library");
+  rb_define_method(rb_mFFILLVMJITLibrary, "attach_llvm_jit_function", attach_llvm_jit_function, 3);
 }

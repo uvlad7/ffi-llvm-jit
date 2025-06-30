@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require_relative 'lib/ffi_llvm_jit/version'
+require_relative 'lib/ffi/llvm_jit/version'
 
 # Project structure inspired by
 # https://github.com/postmodern/ffi-libc
 Gem::Specification.new do |spec|
   spec.name = 'ffi-llvm-jit'
-  spec.version = FfiLlvmJit::VERSION
+  spec.version = FFI::LLVMJIT::VERSION
   spec.authors = ['uvlad7']
   spec.email = ['uvlad7@gmail.com']
 

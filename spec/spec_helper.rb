@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'ffi_llvm_jit'
+require 'ffi/llvm_jit'
 
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure

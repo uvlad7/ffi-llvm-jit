@@ -16,4 +16,4 @@ $CFLAGS << ' -emit-llvm -c ' # rubocop:disable Style/GlobalVars
 # MakeMakefile::COMPILE_C = config_string('COMPILE_C') ||
 #   '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG) -c $(CSRCFLAG)$<'
 
-create_makefile('ffi_llvm_jit/llvm_bitcode')
+create_makefile('llvm_jit/llvm_bitcode')

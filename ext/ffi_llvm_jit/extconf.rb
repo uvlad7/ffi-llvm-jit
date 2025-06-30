@@ -7,4 +7,4 @@ require 'mkmf'
 # selectively, or entirely remove this flag.
 append_cflags('-fvisibility=hidden')
 
-create_makefile('ffi_llvm_jit/ffi_llvm_jit')
+create_makefile('llvm_jit/ffi_llvm_jit')

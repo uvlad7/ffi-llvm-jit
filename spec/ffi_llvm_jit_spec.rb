@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe FfiLlvmJit do
+RSpec.describe FFI::LLVMJIT do
   let(:ffi_llvm_jit_lib) do
     Module.new.tap do |mod|
       mod.extend described_class::Library
@@ -11,7 +11,7 @@ RSpec.describe FfiLlvmJit do
   end
 
   it 'has a version number' do
-    expect(FfiLlvmJit::VERSION).not_to be nil
+    expect(FFI::LLVMJIT::VERSION).not_to be nil
   end
 
   it 'calculates strlen' do
