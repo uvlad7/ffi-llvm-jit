@@ -22,6 +22,8 @@ GEMSPEC.extensions.each do |extension|
   end
 end
 
+task spec: :compile
+
 task default: %i[clobber compile spec rubocop]
 
 # Similar to https://gist.github.com/tenderworks/f4cbb60f2c0dc3ab334eb73fec36f702

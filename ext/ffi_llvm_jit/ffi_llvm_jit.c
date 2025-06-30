@@ -29,8 +29,8 @@ attach_llvm_jit_function(VALUE module, VALUE name_val, VALUE func_val, VALUE arg
     return Qnil;
   }
   argc = NUM2INT(argc_val);
+  // rb_define_module_function uses rb_define_private_method instead of rb_define_method
   rb_define_singleton_method(module, name, func, argc);
-
   rb_define_method(module, name, func, argc);
 
   // return self;

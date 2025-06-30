@@ -2,7 +2,8 @@ PATH
   remote: .
   specs:
     ffi_llvm_jit (0.1.0)
-      ruby-llvm (~> 17)
+      ffi (~> 1.15)
+      ruby-llvm (>= 14)
 
 GEM
   remote: https://rubygems.org/
@@ -77,7 +78,6 @@ PLATFORMS
 
 DEPENDENCIES
   benchmark-ips (~> 2.14)
-  ffi (~> 1.15)
   ffi_llvm_jit!
   pry (= 0.14.2)
   pry-byebug (= 3.10.1)
@@ -85,6 +85,7 @@ DEPENDENCIES
   rake-compiler
   rspec (~> 3.0)
   rubocop (~> 1.21)
+  ruby-llvm (~> 17)
   strlen (~> 1.0)
 
 BUNDLED WITH
