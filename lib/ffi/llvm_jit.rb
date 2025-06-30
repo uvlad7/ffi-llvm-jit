@@ -15,7 +15,7 @@ require_relative 'llvm_jit/ffi_llvm_jit'
 module FFI
   module LLVMJIT
     # Extension to FFI::Library to support JIT compilation using LLVM
-    module Library
+    module Library # rubocop:disable Metrics/ModuleLength
       include ::FFI::Library
 
       LLVM_MOD = LLVM::Module.parse_bitcode(
@@ -29,17 +29,48 @@ module FFI
       # LLVM_ENG.dispose is never called
       # LLVM_MOD.dump
 
+      # # Native integer type
+      # bits = FFI.type_size(:int) * 8
+      # ::LLVM::Int = const_get("Int#{bits}")
+      # @LLVMinst inttoptr
+      POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
+      VALUE = POINTER
+      LLVM_TYPES = {
+        string: LLVM.Pointer(LLVM::Int8),
+        # uint, not uint32, because converters support platform-specific types
+        int: LLVM.const_get("Int#{FFI.type_size(:int) * 8}"),
+        uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
+        ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
+      }.freeze
+
+      private_constant :POINTER, :VALUE, :LLVM_TYPES
+
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
       # FFI::NativeType.constants
       # https://github.com/ffi/ffi/blob/master/ext/ffi_c/Type.c#L410
-      SUPPORTED_TO_NATIVE = %i[string].each_with_object({}) do |type, hash|
-        hash[FFI.find_type(type)] = type
-      end.freeze
 
-      SUPPORTED_FROM_NATIVE = %i[int uint ulong].each_with_object({}) do |type, hash|
-        hash[FFI.find_type(type)] = type
-      end.freeze
+      # rubocop:disable Style/MutableConstant
+      # Frozen later
+      SUPPORTED_TO_NATIVE = {}
+      SUPPORTED_FROM_NATIVE = {}
+      # rubocop:enable Style/MutableConstant
+
+      LLVM_MOD.functions.each do |func|
+        name = func.name
+        if name[/\Affi_llvm_jit_value_to_(.*)\z/, 1]
+          type = Regexp.last_match(1).to_sym
+          SUPPORTED_TO_NATIVE[FFI.find_type(type)] = type
+        elsif name[/\Affi_llvm_jit_(.*)_to_value\z/]
+          type = Regexp.last_match(1).to_sym
+          SUPPORTED_FROM_NATIVE[FFI.find_type(type)] = type
+        end
+
+        raise "Conversion function #{name} defined, but LLVM type #{type} is unknown" if type && !LLVM_TYPES.key?(type)
+      end
+
+      SUPPORTED_TO_NATIVE.freeze
+      SUPPORTED_FROM_NATIVE.freeze
 
       # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
@@ -77,7 +108,6 @@ module FFI
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
         if options[:convention] != :default || !options[:type_map].nil? ||
            options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
-
           return super(mname, cname, arg_types, ret_type, options)
         end
 
@@ -96,22 +126,6 @@ module FFI
 
         attach_llvm_jit_function(mname, function_handle.address, arg_type_names, ret_type_name)
       end
-
-      # # Native integer type
-      # bits = FFI.type_size(:int) * 8
-      # ::LLVM::Int = const_get("Int#{bits}")
-      # @LLVMinst inttoptr
-      POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
-      VALUE = POINTER
-      LLVM_TYPES = {
-        string: LLVM.Pointer(LLVM::Int8),
-        # uint, not uint32, because converters support platform-specific types
-        int: LLVM.const_get("Int#{FFI.type_size(:int) * 8}"),
-        uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
-        ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
-      }.freeze
-
-      private_constant :POINTER, :VALUE, :LLVM_TYPES
 
       private
 
