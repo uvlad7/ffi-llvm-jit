@@ -36,7 +36,6 @@ module FFI
       # @LLVMinst inttoptr
       POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = POINTER
-      VALUE_PTR = LLVM.Pointer(VALUE)
       LLVM_TYPES = {
         string: LLVM.Pointer(LLVM::Int8),
         # uint, not uint32, because converters support platform-specific types
@@ -47,7 +46,7 @@ module FFI
         void: LLVM.Void,
       }.freeze
 
-      private_constant :POINTER, :VALUE, :VALUE_PTR, :LLVM_TYPES
+      private_constant :POINTER, :VALUE, :LLVM_TYPES
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -165,7 +164,7 @@ module FFI
             res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), *converted_params)
             b.ret(
               if ret_type_name == :void
-                b.load2(VALUE_PTR, LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
+                b.load2(VALUE, LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
               else
                 b.call(LLVM_MOD.functions["ffi_llvm_jit_#{ret_type_name}_to_value"], res)
               end,
