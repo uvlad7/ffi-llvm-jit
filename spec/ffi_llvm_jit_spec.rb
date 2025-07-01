@@ -57,6 +57,12 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(ffi_llvm_jit_lib.llvm_jit_strcasecmp('ABBA', 'abBA')).to be 0
   end
 
+  it 'handles name clashes' do
+    ffi_llvm_jit_lib.attach_function(:strcmp, %i[string string], :int)
+    ffi_llvm_jit_lib.attach_function(:strcmp, :strcasecmp, %i[string string], :int)
+    expect(ffi_llvm_jit_lib.llvm_jit_strcmp('ABBA', 'abBA')).to be 0
+  end
+
   it 'handles unsigned values well' do
     # LONG_MIN: -9223372036854775808, LONG_MAX: 9223372036854775807, ULONG_MAX: 18446744073709551615
     # the second argument is actually a char **, but as pointer isn't

@@ -153,7 +153,7 @@ module FFI
         # Upd: It happens if functions are the same even though their names are different
 
         rb_func = llvm_mod.functions.add(
-          :"rb_llvm_jit_wrap_#{rb_name}", [VALUE] * (arg_type_names.size + 1), VALUE,
+          :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (arg_type_names.size + 1), VALUE,
         ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |b|
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
@@ -172,6 +172,11 @@ module FFI
           end
         end
 
+        # Ruby llvm_mod object isn't kept arount and might be GCed, but
+        # it doesn't call +dispose+ automatically, so it's ok.
+        # Note that in function name +llvm_mod.hash+ is used and it
+        # mustn't be reused until the module is disposed, unlike
+        # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
         LLVM_ENG.modules.add(llvm_mod)
         # rb_func.name isn't always the same as rb_name, in case of name clashes
         # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
