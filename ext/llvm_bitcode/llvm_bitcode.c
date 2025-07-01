@@ -1,5 +1,7 @@
 #include "llvm_bitcode.h"
 
+VALUE ffi_llvm_jit_Qnil = Qnil;
+
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Call.c
 // TODO: Since we generate code for every function, we could easily support safe
 // non-nullable arguments with almost no overhead.

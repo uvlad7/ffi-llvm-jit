@@ -65,7 +65,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     # Don't use it in real life code!
     ffi_llvm_jit_lib.attach_function :strtoul, %i[string string int], :ulong
     ffi_llvm_jit_lib.attach_function :strtol, %i[string string int], :long
-    ulong_max = (2 ** (FFI.find_type(:ulong).size * 8)) - 1
+    ulong_max = (2**(FFI.find_type(:ulong).size * 8)) - 1
     expect(ffi_llvm_jit_lib.llvm_jit_strtoul(ulong_max.to_s, nil, 0)).to eq ulong_max
     expect(ffi_llvm_jit_lib.llvm_jit_strtol('-1', nil, 0)).to eq(-1)
   end
@@ -76,5 +76,23 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(ffi_llvm_jit_lib.llvm_jit_getenv('JIT_ANSWER')).to eq('42')
     ENV.delete('JIT_ANSWER')
     expect(ffi_llvm_jit_lib.llvm_jit_getenv('JIT_ANSWER')).to be_nil
+  end
+
+  it 'supports void return values' do
+    # Again, only for testing purposes, don't use it in real life code,
+    # first arg should be pointer instead and you shouldn't modify Ruby strings in C func!
+    ffi_llvm_jit_lib.attach_function :memset, %i[string int size_t], :void
+    buf = 42.chr * 42
+    expect(ffi_llvm_jit_lib.llvm_jit_memset(buf, 34, 34)).to be_nil
+    expect(buf).to eq('""""""""""""""""""""""""""""""""""********')
+  end
+
+  it "doesn't accept void parameters" do
+    res = ffi_llvm_jit_lib.attach_function :memset, %i[string void size_t], :void
+    expect(res).to be_a(FFI::Function)
+    # Surprisignly, they allow that, but
+    #   ffi_llvm_jit_lib.memset("", nil, 0)
+    # would raise
+    #   ArgumentError: Invalid parameter type: 0
   end
 end

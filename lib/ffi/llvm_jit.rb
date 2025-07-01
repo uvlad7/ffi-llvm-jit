@@ -36,6 +36,7 @@ module FFI
       # @LLVMinst inttoptr
       POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = POINTER
+      VALUE_PTR = LLVM.Pointer(VALUE)
       LLVM_TYPES = {
         string: LLVM.Pointer(LLVM::Int8),
         # uint, not uint32, because converters support platform-specific types
@@ -43,9 +44,10 @@ module FFI
         uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
         long: LLVM.const_get("Int#{FFI.type_size(:long) * 8}"),
         ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
+        void: LLVM.Void,
       }.freeze
 
-      private_constant :POINTER, :VALUE, :LLVM_TYPES
+      private_constant :POINTER, :VALUE, :VALUE_PTR, :LLVM_TYPES
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -71,6 +73,7 @@ module FFI
         raise "Conversion function #{name} defined, but LLVM type #{type} is unknown" if type && !LLVM_TYPES.key?(type)
       end
 
+      SUPPORTED_FROM_NATIVE[FFI.find_type(:void)] = :void
       SUPPORTED_TO_NATIVE.freeze
       SUPPORTED_FROM_NATIVE.freeze
 
@@ -84,11 +87,9 @@ module FFI
         a4 = returns
         a5 = options
         cname, arg_types, ret_type, opts = if a4 && (a2.is_a?(String) || a2.is_a?(Symbol))
-                                             [a2, a3, a4,
-                                              a5]
+                                             [a2, a3, a4, a5]
                                            else
-                                             [mname.to_s, a2, a3,
-                                              a4]
+                                             [mname.to_s, a2, a3, a4]
                                            end
         # Convert :foo to the native type
         arg_types = arg_types.map { |e| find_type(e) }
@@ -162,16 +163,19 @@ module FFI
 
             func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
             res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), *converted_params)
-
-            b.ret b.call(LLVM_MOD.functions["ffi_llvm_jit_#{ret_type_name}_to_value"], res)
+            b.ret(
+              if ret_type_name == :void
+                b.load2(VALUE_PTR, LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
+              else
+                b.call(LLVM_MOD.functions["ffi_llvm_jit_#{ret_type_name}_to_value"], res)
+              end,
+            )
           end
         end
 
         LLVM_ENG.modules.add(llvm_mod)
-
         # rb_func.name isn't always the same as rb_name, in case of name clashes
         # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
-
         jit_name = "llvm_jit_#{rb_name}"
         # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
         attach_rb_wrap_function(jit_name, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
