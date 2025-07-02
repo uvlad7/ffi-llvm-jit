@@ -101,4 +101,18 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     # would raise
     #   ArgumentError: Invalid parameter type: 0
   end
+
+  it 'works across forks' do
+    read, write = IO.pipe
+    lib = ffi_llvm_jit_lib
+    pid = Process.fork do
+      read.close
+      write.write(lib.llvm_jit_strlen('Hello from FFI LLVM JIT!'))
+      exit!(0)
+    end
+    write.close
+    result = read.read
+    Process.wait(pid)
+    expect(result).to eq('24')
+  end
 end
