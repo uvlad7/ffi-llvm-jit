@@ -48,6 +48,8 @@ module FFI
         long_long: LLVM.const_get("Int#{FFI.type_size(:long_long) * 8}"),
         ulong_long: LLVM.const_get("Int#{FFI.type_size(:ulong_long) * 8}"),
         bool: LLVM::Int1,
+        float: LLVM::Float,
+        double: LLVM::Double,
         void: LLVM.Void,
       }.freeze
 

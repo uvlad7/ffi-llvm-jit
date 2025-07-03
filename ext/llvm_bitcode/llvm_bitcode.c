@@ -47,6 +47,14 @@ __attribute__((always_inline)) bool ffi_llvm_jit_value_to_bool(VALUE arg) {
     }
 }
 
+__attribute__((always_inline)) float ffi_llvm_jit_value_to_float(VALUE arg) {
+    return (float) NUM2DBL(arg);
+}
+
+__attribute__((always_inline)) double ffi_llvm_jit_value_to_double(VALUE arg) {
+    return NUM2DBL(arg);
+}
+
 // See https://github.com/ffi/ffi/blob/master/ext/ffi_c/Types.c
 __attribute__((always_inline)) VALUE ffi_llvm_jit_string_to_value(char * arg) {
     return arg != NULL ? rb_str_new2(arg) : Qnil;
@@ -70,7 +78,6 @@ __attribute__((always_inline)) VALUE ffi_llvm_jit_ulong_to_value(unsigned long a
 
 // TODO: Ruby defines long long differently, see include/ruby/backward/2/long_long.h
 // but FFI simply uses `long long`, and so do I
-
 __attribute__((always_inline)) VALUE ffi_llvm_jit_long_long_to_value(long long arg) {
     return LL2NUM(arg);
 }
@@ -81,4 +88,13 @@ __attribute__((always_inline)) VALUE ffi_llvm_jit_ulong_long_to_value(unsigned l
 
 __attribute__((always_inline)) VALUE ffi_llvm_jit_bool_to_value(bool arg) {
     return arg ? Qtrue : Qfalse;
+}
+
+__attribute__((always_inline)) VALUE ffi_llvm_jit_float_to_value(float arg) {
+    // FFI uses rb_float_new, I prefer DBL2NUM - which is defined exactly like that - for consistency
+    return DBL2NUM(arg);
+}
+
+__attribute__((always_inline)) VALUE ffi_llvm_jit_double_to_value(double arg) {
+    return DBL2NUM(arg);
 }

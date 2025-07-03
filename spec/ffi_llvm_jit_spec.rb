@@ -126,4 +126,17 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(ffi_llvm_jit_lib.llvm_jit_strtoull(ulong_max.to_s, nil, 0)).to eq ulong_max
     expect(ffi_llvm_jit_lib.llvm_jit_strtoll('-1', nil, 0)).to eq(-1)
   end
+
+  it 'supports float and double' do
+    ffi_llvm_jit_lib.attach_function :strtof, %i[string string], :float
+    ffi_llvm_jit_lib.attach_function :strtod, %i[string string], :double
+    max_float = '340282346638528859811704183484516925440.0000000000000000'
+    expect(ffi_llvm_jit_lib.llvm_jit_strtof(max_float, nil)).to eq(3.4028234663852886e+38)
+    max_double = '179769313486231570814527423731704356798070567525844996598917476803157260780028538' \
+                 '760589558632766878171540458953514382464234321326889464182768467546703537516986049' \
+                 '910576551282076245490090389328944075868508455133942304583236903222948165808559332' \
+                 '123348274797826204144723168738177180919299881250404026184124858368.0000000000000000'
+    expect(ffi_llvm_jit_lib.llvm_jit_strtof(max_double, nil)).to eq(Float::INFINITY)
+    expect(ffi_llvm_jit_lib.llvm_jit_strtod(max_double, nil)).to eq(1.7976931348623157e+308)
+  end
 end
