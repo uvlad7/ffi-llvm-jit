@@ -88,7 +88,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     # Again, only for testing purposes, don't use it in real life code,
     # first arg should be pointer instead
     # (UPD: this is fine, FFI supports strings and nils where pointer is expected and converts them
-    # the same way string arg is converted, so essentially string is a subset of pointer for argument type)
+    # almost the same way string arg is converted (StringValuePtr, which is less strict than StringValueCStr)
+    # so essentially string is a subset of pointer for argument type)
     # and you probably shouldn't modify Ruby strings in C func!
     ffi_llvm_jit_lib.attach_function :memset, %i[string int size_t], :void
     buf = 42.chr * 42
@@ -128,6 +129,10 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'supports float and double' do
+    ffi_llvm_jit_lib.ffi_lib 'm'
+    ffi_llvm_jit_lib.attach_function :powf, %i[float float], :float
+    ffi_llvm_jit_lib.attach_function :pow, %i[double double], :double
+
     ffi_llvm_jit_lib.attach_function :strtof, %i[string string], :float
     ffi_llvm_jit_lib.attach_function :strtod, %i[string string], :double
     max_float = '340282346638528859811704183484516925440.0000000000000000'
@@ -138,5 +143,10 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
                  '123348274797826204144723168738177180919299881250404026184124858368.0000000000000000'
     expect(ffi_llvm_jit_lib.llvm_jit_strtof(max_double, nil)).to eq(Float::INFINITY)
     expect(ffi_llvm_jit_lib.llvm_jit_strtod(max_double, nil)).to eq(1.7976931348623157e+308)
+
+    expect(ffi_llvm_jit_lib.llvm_jit_powf(2.0, 2.0)).to eq 4.0
+    expect(ffi_llvm_jit_lib.llvm_jit_powf(1.7, 308)).to eq(Float::INFINITY)
+    expect(ffi_llvm_jit_lib.llvm_jit_pow(2.0, 2.0)).to eq 4.0
+    expect(ffi_llvm_jit_lib.llvm_jit_pow(1.7, 308)).to eq(1.7 ** 308)
   end
 end
