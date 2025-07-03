@@ -146,7 +146,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.llvm_jit_powf(2.0, 2.0)).to eq 4.0
     expect(jitlib.llvm_jit_powf(1.7, 308)).to eq(Float::INFINITY)
     expect(jitlib.llvm_jit_pow(2.0, 2.0)).to eq 4.0
-    expect(jitlib.llvm_jit_pow(1.7, 308)).to eq(1.7 ** 308)
+    expect(jitlib.llvm_jit_pow(1.7, 308)).to eq(1.7**308)
   end
 
   it 'supports bool' do
@@ -160,5 +160,10 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.llvm_jit_spec_bool_ret(42)).to be true
     expect(jitlib.llvm_jit_spec_bool_ret(24)).to be false
     expect(jitlib.llvm_jit_spec_bool_ret(42.24)).to be true
+  end
+
+  it 'supports char' do
+    jitlib.attach_function :spec_char_to_downcase, [:char], :char
+    expect(jitlib.llvm_jit_spec_char_to_downcase('A'.ord).chr).to eq('a')
   end
 end

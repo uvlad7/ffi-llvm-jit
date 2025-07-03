@@ -39,6 +39,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'ffi', '~> 1.15'
   spec.add_dependency 'ruby-llvm', '>= 14'
 
+  spec.requirements.push('llvm-14-dev or newer')
+
   spec.add_development_dependency 'pry', '0.14.2'
   spec.add_development_dependency 'pry-byebug', '3.10.1'
 

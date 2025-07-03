@@ -37,20 +37,27 @@ module FFI
       POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = POINTER
       LLVM_TYPES = {
-        string: LLVM.Pointer(LLVM::Int8),
-        # uint, not uint32, because converters support platform-specific types
-        int: LLVM.const_get("Int#{FFI.type_size(:int) * 8}"),
-        uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
+        # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
+        void: LLVM.Void,
+        int8: LLVM.const_get("Int#{FFI.type_size(:int8) * 8}"),
+        uint8: LLVM.const_get("Int#{FFI.type_size(:uint8) * 8}"),
+        int16: LLVM.const_get("Int#{FFI.type_size(:int16) * 8}"),
+        uint16: LLVM.const_get("Int#{FFI.type_size(:uint16) * 8}"),
+        int32: LLVM.const_get("Int#{FFI.type_size(:int32) * 8}"),
+        uint32: LLVM.const_get("Int#{FFI.type_size(:uint32) * 8}"),
+        int64: LLVM.const_get("Int#{FFI.type_size(:int64) * 8}"),
+        uint64: LLVM.const_get("Int#{FFI.type_size(:uint64) * 8}"),
         long: LLVM.const_get("Int#{FFI.type_size(:long) * 8}"),
         ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
-        # long_long and ulong_long resolve into int64 and uint64, but
-        # long_long and ulong_long were chosen because ruby specifies them as supported
-        long_long: LLVM.const_get("Int#{FFI.type_size(:long_long) * 8}"),
-        ulong_long: LLVM.const_get("Int#{FFI.type_size(:ulong_long) * 8}"),
-        bool: LLVM::Int1,
+        # These types are actually defined as float and double in FFI
+        # and despite they are called float32 and float64 in the definitions
+        # and having FFI::NativeType::FLOAT32/FFI::NativeType::FLOAT64 constants,
+        # you can't find them through FFI.find_type and therefore use in attach_function
+        # anyway, they are just aliases
         float: LLVM::Float,
         double: LLVM::Double,
-        void: LLVM.Void,
+        bool: LLVM.const_get("Int#{FFI.type_size(:bool) * 8}"),
+        string: LLVM.Pointer(LLVM::Int8),
       }.freeze
 
       private_constant :POINTER, :VALUE, :LLVM_TYPES
