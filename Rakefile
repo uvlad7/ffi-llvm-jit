@@ -22,6 +22,12 @@ GEMSPEC.extensions.each do |extension|
   end
 end
 
+namespace 'spec_compile' do
+  require 'ffi-compiler/compile_task'
+  FFI::Compiler::CompileTask.new('spec/ext/ffi_llvm_jit_spec/ffi_llvm_jit_spec')
+end
+task spec: 'spec_compile:default'
+
 task spec: :compile
 
 task default: %i[clobber compile spec rubocop]

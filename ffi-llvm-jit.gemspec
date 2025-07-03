@@ -47,6 +47,8 @@ Gem::Specification.new do |spec|
   # Only because its major version matches required llvm version and I have llvm-17 installed
   spec.add_development_dependency 'ruby-llvm', '~> 17'
 
+  spec.add_development_dependency 'ffi-compiler', '~> 1.3'
+
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
 
