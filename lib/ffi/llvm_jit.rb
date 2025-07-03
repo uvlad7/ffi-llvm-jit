@@ -43,6 +43,11 @@ module FFI
         uint: LLVM.const_get("Int#{FFI.type_size(:uint) * 8}"),
         long: LLVM.const_get("Int#{FFI.type_size(:long) * 8}"),
         ulong: LLVM.const_get("Int#{FFI.type_size(:ulong) * 8}"),
+        # long_long and ulong_long resolve into int64 and uint64, but
+        # long_long and ulong_long were chosen because ruby specifies them as supported
+        long_long: LLVM.const_get("Int#{FFI.type_size(:long_long) * 8}"),
+        ulong_long: LLVM.const_get("Int#{FFI.type_size(:ulong_long) * 8}"),
+        bool: LLVM::Int1,
         void: LLVM.Void,
       }.freeze
 

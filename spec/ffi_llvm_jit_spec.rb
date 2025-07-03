@@ -86,7 +86,10 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
   it 'supports void return values' do
     # Again, only for testing purposes, don't use it in real life code,
-    # first arg should be pointer instead and you shouldn't modify Ruby strings in C func!
+    # first arg should be pointer instead
+    # (UPD: this is fine, FFI supports strings and nils where pointer is expected and converts them
+    # the same way string arg is converted, so essentially string is a subset of pointer for argument type)
+    # and you probably shouldn't modify Ruby strings in C func!
     ffi_llvm_jit_lib.attach_function :memset, %i[string int size_t], :void
     buf = 42.chr * 42
     expect(ffi_llvm_jit_lib.llvm_jit_memset(buf, 34, 34)).to be_nil
@@ -114,5 +117,13 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     result = read.read
     Process.wait(pid)
     expect(result).to eq('24')
+  end
+
+  it 'supports long long' do
+    ffi_llvm_jit_lib.attach_function :strtoull, %i[string string int], :ulong_long
+    ffi_llvm_jit_lib.attach_function :strtoll, %i[string string int], :long_long
+    ulong_max = (2**64) - 1
+    expect(ffi_llvm_jit_lib.llvm_jit_strtoull(ulong_max.to_s, nil, 0)).to eq ulong_max
+    expect(ffi_llvm_jit_lib.llvm_jit_strtoll('-1', nil, 0)).to eq(-1)
   end
 end
