@@ -100,7 +100,8 @@ module FFI
         super(mname, cname, arg_types, ret_type, options)
       end
 
-      # Same as attach_function, but raises an exception if cannot create JIT function instead of falling back to the regular FFI function
+      # Same as attach_function, but raises an exception if cannot create JIT function
+      # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
         mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
         return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
