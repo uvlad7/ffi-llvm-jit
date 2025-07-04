@@ -163,6 +163,12 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
   it 'supports char' do
     jitlib.attach_llvm_jit_function :spec_char_to_downcase, [:char], :char
+    jitlib.attach_llvm_jit_function :spec_uchar_to_downcase, [:uchar], :uchar
     expect(jitlib.spec_char_to_downcase('A'.ord).chr).to eq('a')
+    expect(jitlib.spec_uchar_to_downcase('A'.ord).chr).to eq('a')
+    expect(jitlib.spec_char_to_downcase('A'.ord - 256).chr).to eq('a')
+    expect(jitlib.spec_uchar_to_downcase('A'.ord - 256).chr).to eq('a')
+    expect(jitlib.spec_char_to_downcase(127)).to eq(-97)
+    expect(jitlib.spec_uchar_to_downcase(127)).to eq(159)
   end
 end

@@ -1,16 +1,20 @@
 
 #include <stdbool.h>
 
-int spec_bool_param(bool val)
+signed int spec_bool_param(bool val)
 {
     return val ? 42 : 24;
 }
 
-bool spec_bool_ret(int val)
+bool spec_bool_ret(signed int val)
 {
     return val == 42;
 }
 
-char spec_char_to_downcase(char val) {
+signed char spec_char_to_downcase(signed char val) {
+    return val + 32;
+}
+
+unsigned char spec_uchar_to_downcase(unsigned char val) {
     return val + 32;
 }
