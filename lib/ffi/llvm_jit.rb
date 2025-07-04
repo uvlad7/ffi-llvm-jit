@@ -94,6 +94,23 @@ module FFI
 
       # @note Return type doesn't match the original method, but it's usually not used
       def attach_function(name, func, args, returns = nil, options = nil)
+        mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
+        return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
+
+        super(mname, cname, arg_types, ret_type, options)
+      end
+
+      # Same as attach_function, but raises an exception if cannot create JIT function instead of falling back to the regular FFI function
+      def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
+        mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
+        return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
+
+        raise NotImplementedError, "Cannot create JIT function #{name}"
+      end
+
+      private
+
+      def convert_params(name, func, args, returns, options)
         mname = name
         a2 = func
         a3 = args
@@ -116,6 +133,10 @@ module FFI
         @blocking = false
         options.merge!(opts) if opts.is_a?(Hash)
 
+        [mname, cname, arg_types, ret_type, options]
+      end
+
+      def attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
         # TODO: support stdcall convention (rb_func.call_conv=)
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
@@ -124,7 +145,7 @@ module FFI
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
         if options[:convention] != :default || !options[:type_map].nil? ||
            options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
-          return super(mname, cname, arg_types, ret_type, options)
+          return false
         end
 
         function_handle = ffi_libraries.find do |lib|
@@ -140,12 +161,13 @@ module FFI
         end
         raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name)) unless function_handle
 
-        attach_llvm_jit_function(mname, function_handle.address, arg_type_names, ret_type_name)
+        attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name)
+        # singleton_class.alias_method rb_name, jit_name
+        # alias_method rb_name, jit_name
+        true
       end
 
-      private
-
-      def attach_llvm_jit_function(rb_name, c_address, arg_type_names, ret_type_name)
+      def attach_llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
@@ -194,11 +216,8 @@ module FFI
         LLVM_ENG.modules.add(llvm_mod)
         # rb_func.name isn't always the same as rb_name, in case of name clashes
         # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
-        jit_name = "llvm_jit_#{rb_name}"
         # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
-        attach_rb_wrap_function(jit_name, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
-        singleton_class.alias_method rb_name, jit_name
-        alias_method rb_name, jit_name
+        attach_rb_wrap_function(rb_name.to_s, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
         nil
       end
 
