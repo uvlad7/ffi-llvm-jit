@@ -82,7 +82,7 @@ Comparison:
 
 After checking out the repo, run `bin/setup` to install dependencies.
 
-LLVM 17 is used for development, install it via `apt install llvm17-dev` or change `ruby-llvm` version in [`ffi-llvm-jit.gemspec`](ffi-llvm-jit.gemspec) if you want to use another version of LLVM.
+LLVM 17 is used for development, install it via `apt install llvm17-dev` or change `ruby-llvm` version in [ffi-llvm-jit.gemspec](./ffi-llvm-jit.gemspec) if you want to use another version of LLVM.
 
 Then, run `bundle exec rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
 

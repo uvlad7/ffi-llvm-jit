@@ -7,12 +7,13 @@ require 'llvm/execution_engine'
 require_relative 'llvm_jit/version'
 require_relative 'llvm_jit/ffi_llvm_jit'
 
-# https://llvm.org/doxygen/group__LLVMCCoreModule.html
-# https://llvm.org/doxygen/group__LLVMCBitReader.html
-# https://llvm.org/doxygen/group__LLVMCCoreMemoryBuffers.html
-# see llvm/core/bitcode.rb
-
 module FFI
+  # https://llvm.org/doxygen/group__LLVMCCoreModule.html
+  # https://llvm.org/doxygen/group__LLVMCBitReader.html
+  # https://llvm.org/doxygen/group__LLVMCCoreMemoryBuffers.html
+  # see llvm/core/bitcode.rb
+
+  # Ruby FFI JIT using LLVM
   module LLVMJIT
     # Extension to FFI::Library to support JIT compilation using LLVM
     module Library # rubocop:disable Metrics/ModuleLength
@@ -33,7 +34,7 @@ module FFI
       # # Native integer type
       # bits = FFI.type_size(:int) * 8
       # ::LLVM::Int = const_get("Int#{bits}")
-      # @LLVMinst inttoptr
+      # see @LLVMinst inttoptr
       POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = POINTER
       LLVM_TYPES = {
@@ -69,8 +70,10 @@ module FFI
 
       # rubocop:disable Style/MutableConstant
       # Frozen later
+
       SUPPORTED_TO_NATIVE = {}
       SUPPORTED_FROM_NATIVE = {}
+
       # rubocop:enable Style/MutableConstant
 
       LLVM_MOD.functions.each do |func|
@@ -89,10 +92,12 @@ module FFI
       SUPPORTED_FROM_NATIVE[FFI.find_type(:void)] = :void
       SUPPORTED_TO_NATIVE.freeze
       SUPPORTED_FROM_NATIVE.freeze
+      private_constant :SUPPORTED_TO_NATIVE, :SUPPORTED_FROM_NATIVE
 
       # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # @note Return type doesn't match the original method, but it's usually not used
+      # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
       def attach_function(name, func, args, returns = nil, options = nil)
         mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
         return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
@@ -100,7 +105,7 @@ module FFI
         super(mname, cname, arg_types, ret_type, options)
       end
 
-      # Same as attach_function, but raises an exception if cannot create JIT function
+      # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
         mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)

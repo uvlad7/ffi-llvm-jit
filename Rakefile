@@ -9,6 +9,14 @@ require 'rubocop/rake_task'
 
 RuboCop::RakeTask.new
 
+require 'yard'
+
+YARD::Rake::YardocTask.new do |t|
+  # use .yardopts file instead
+  # t.options = gemspec.rdoc_options
+  t.options += ['--output-dir', ENV['DOCS_DIR']] if ENV['DOCS_DIR']
+end
+
 require 'rake/extensiontask'
 
 task build: :compile
@@ -30,7 +38,7 @@ task spec: 'spec_compile:default'
 
 task spec: :compile
 
-task default: %i[clobber compile spec rubocop]
+task default: %i[clobber compile spec rubocop yard]
 
 # Similar to https://gist.github.com/tenderworks/f4cbb60f2c0dc3ab334eb73fec36f702
 # rubocop:disable Metrics/BlockLength, Style/Documentation, Lint/ConstantDefinitionInBlock, Naming/MethodParameterName

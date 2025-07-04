@@ -4,14 +4,7 @@ VALUE rb_mFFI;
 VALUE rb_mFFILLVMJIT;
 VALUE rb_mFFILLVMJITLibrary;
 
-// https://github.com/ffi/ffi/blob/master/ext/ffi_c/Function.c
-/*
- * call-seq: attach(m, name)
-//  * @param [Module] m
- * @param [String] name
- * @return [self]
- * Attach a Function to the Module +m+ as +name+.
- */
+// from https://github.com/ffi/ffi/blob/master/ext/ffi_c/Function.c
 static VALUE
 attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc_val)
 {
@@ -44,5 +37,5 @@ Init_ffi_llvm_jit(void)
   rb_mFFI = rb_define_module("FFI");
   rb_mFFILLVMJIT = rb_define_module_under(rb_mFFI, "LLVMJIT");
   rb_mFFILLVMJITLibrary = rb_define_module_under(rb_mFFILLVMJIT, "Library");
-  rb_define_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 3);
+  rb_define_private_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 3);
 }
