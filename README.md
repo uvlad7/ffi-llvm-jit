@@ -1,6 +1,6 @@
 # FFI::LLVMJIT
 
-Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. Works only on MRI, isn't rested on Windows.
+Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. Works only on MRI, isn't tested on Windows.
 
 ## Requirements
 
