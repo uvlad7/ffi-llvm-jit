@@ -10,6 +10,14 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     end
   end
 
+  let(:stdcall_jitlib) do
+    Module.new.tap do |mod|
+      mod.extend described_class::Library
+      mod.ffi_convention :stdcall
+      mod.ffi_lib FFI::Library::LIBC, FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './ext/ffi_llvm_jit_spec'), 'm'
+    end
+  end
+
   it 'has a version number' do
     expect(FFI::LLVMJIT::VERSION).not_to be nil
   end
@@ -182,5 +190,35 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_uchar_to_downcase('A'.ord - 256).chr).to eq('a')
     expect(jitlib.spec_char_to_downcase(127)).to eq(-97)
     expect(jitlib.spec_uchar_to_downcase(127)).to eq(159)
+  end
+
+  it 'supports stdcall' do
+    if FFI::Platform::OS =~ /windows|cygwin/ && FFI::Platform::ARCH == 'i386'
+      expect(described_class::Library.const_get(:LLVM_STDCALL)).to be_a(Symbol)
+    else
+      expect(described_class::Library.const_get(:LLVM_STDCALL)).to be_nil
+      skip "stdcall isn't supported on #{FFI::Platform::OS}-#{FFI::Platform::ARCH}"
+    end
+    expect(stdcall_jitlib.attach_function(
+             :test_stdcall, %i[int8 int16 int32 int64 float double], :long,
+           )).to be_nil
+    expect(stdcall_jitlib.test_stdcall(1, 2, 3, 4, 1.0, 2.0)).to eq(42)
+
+    skip "structures and pointers aren't supported yet"
+
+    struct_ucdp = Class.new(FFI::Struct) do
+      layout :a1, :uchar,
+             :a2, :double,
+             :a3, :pointer
+    end
+    expect(stdcall_jitlib.attach_function(
+             :test_stdcall_many_params, [
+               :pointer, :int8, :int16, :int32, :int64, struct_ucdp.by_value, struct_ucdp.by_ref, :float, :double,
+             ], :void,
+           )).to be_nil
+    s = struct_ucdp.new
+    po = FFI::MemoryPointer.new :long
+    stdcall_jitlib.test_stdcall_many_params po, 1, 2, 3, 4, s, s, 1.0, 2.0
+    expect(po.read_long).to eq 42
   end
 end
