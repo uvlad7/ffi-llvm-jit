@@ -61,7 +61,7 @@ module FFI
         string: LLVM.Pointer(LLVM::Int8),
       }.freeze
 
-      private_constant :POINTER, :VALUE, :LLVM_TYPES
+      private_constant :POINTER, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -108,6 +108,10 @@ module FFI
       # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
+        # TODO: support LLVM call_conv; not that function_names must be patched for that
+        # (they also forgot an underscore on Windows for cdecl)
+        # https://en.wikipedia.org/wiki/Name_mangling#C
+        # (see core_ffi.rb and https://llvm.org/doxygen/namespacellvm_1_1CallingConv.html)
         mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
         return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
 
@@ -149,8 +153,8 @@ module FFI
         # but we'd still need to know use libffi to create varargs
         ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
-        if options[:convention] != :default || !options[:type_map].nil? ||
-           options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
+        if !options[:type_map].nil? || options[:blocking] || options[:enums] ||
+           ret_type_name.nil? || arg_type_names.any?(&:nil?)
           return false
         end
 
@@ -167,13 +171,14 @@ module FFI
         end
         raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name)) unless function_handle
 
-        attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name)
+        call_conv = options[:convention] == :stdcall ? LLVM_STDCALL : nil
+        attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
         # singleton_class.alias_method rb_name, jit_name
         # alias_method rb_name, jit_name
         true
       end
 
-      def attach_llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name)
+      def attach_llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
@@ -202,8 +207,11 @@ module FFI
               b.call(LLVM_MOD.functions["ffi_llvm_jit_value_to_#{arg_type}"], param)
             end
 
-            func_ptr_val = b.int2ptr(func_ptr, fn_ptr_type)
-            res = b.call2(fn_type, b.load2(fn_ptr_type, func_ptr_val), *converted_params)
+            func_ptr_val = b.load2(fn_ptr_type, b.int2ptr(func_ptr, fn_ptr_type))
+            # See value.rb (Function) and builder.rb (Builder#call2)
+            # func_ptr_val is actually an Instruction, can't set call_conv
+            res = b.call2(fn_type, func_ptr_val, *converted_params)
+            res.call_conv = call_conv if call_conv
             b.ret(
               if ret_type_name == :void
                 b.load2(VALUE, LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
@@ -213,6 +221,7 @@ module FFI
             )
           end
         end
+        # rb_func.dump
 
         # Ruby llvm_mod object isn't kept arount and might be GCed, but
         # it doesn't call +dispose+ automatically, so it's ok.

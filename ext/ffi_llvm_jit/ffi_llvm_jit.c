@@ -37,5 +37,14 @@ Init_ffi_llvm_jit(void)
   rb_mFFI = rb_define_module("FFI");
   rb_mFFILLVMJIT = rb_define_module_under(rb_mFFI, "LLVMJIT");
   rb_mFFILLVMJITLibrary = rb_define_module_under(rb_mFFILLVMJIT, "Library");
+  rb_define_const(rb_mFFILLVMJITLibrary, "LLVM_STDCALL",
+  // That's how FFI hadles it, see https://github.com/ffi/ffi/blob/5b44581847bf167b83db51ac64aa409ccc9cabee/ext/ffi_c/FunctionInfo.c#L233
+  // the only supported calling convention other than default is stdcall on x86 windows
+#if defined(X86_WIN32)
+  rb_intern("x86_stdcall")
+#else
+  Qnil
+#endif
+  );
   rb_define_private_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 3);
 }

@@ -45,6 +45,18 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.attach_function(:strlen6, :strlen, [:string], :size_t)).to be_a(FFI::Function)
   end
 
+  it 'detects typedefs' do
+    expect(jitlib.attach_function(:strlen7, :strlen, [:string], :size_t)).to be_nil
+    jitlib.typedef :size_t, :length
+    expect(jitlib.attach_function(:strlen8, :strlen, [:string], :size_t)).to be_a(FFI::Function)
+  end
+
+  it 'detects enums' do
+    expect(jitlib.attach_function(:strlen9, :strlen, [:string], :size_t)).to be_nil
+    jitlib.enum :foo, %i[zero one two]
+    expect(jitlib.attach_function(:strlen10, :strlen, [:string], :size_t)).to be_a(FFI::Function)
+  end
+
   it 'supports multiple args' do
     expect(jitlib.attach_llvm_jit_function(:strcmp, %i[string string], :int)).to be_nil
     expect(jitlib.attach_llvm_jit_function(:strcasecmp, %i[string string], :int)).to be_nil
