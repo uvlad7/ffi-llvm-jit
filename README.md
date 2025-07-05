@@ -1,6 +1,6 @@
 # FFI::LLVMJIT
 
-Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. Works only on MRI.
+Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. Works only on MRI, isn't rested on Windows.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ gem install ffi-llvm-jit
 
 ## Usage
 
-This gem provides `FFI::LLVMJIT::Library` module that intends to be fully compatible with (`FFI::Library`)[https://www.rubydoc.info/gems/ffi/1.17.2/FFI/Library#attach_function-instance_method]. It defines its own `attach_function` method to create a faster JIT fuction instead of a FFI wrapper. The only difference for the caller is that `attach_function` returns `nil` instead of `FFI::Function`/`FFI::VariadicInvoker` when JIT function is created.
+This gem provides `FFI::LLVMJIT::Library` module that intends to be fully compatible with [FFI::Library](https://www.rubydoc.info/gems/ffi/1.17.2/FFI/Library#attach_function-instance_method). It defines its own `attach_function` method to create a faster JIT fuction instead of a FFI wrapper. The only difference for the caller is that `attach_function` returns `nil` instead of `FFI::Function`/`FFI::VariadicInvoker` when JIT function is created.
 
 Only basic types and none configuration options are supported; in case of unsupported parameters `ffi-llvm-jit` simply calls `ffi`. It also provides `attach_llvm_jit_function` method that raises an exception instead in that case.
 

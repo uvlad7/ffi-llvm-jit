@@ -9,19 +9,33 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    name: Ruby ${{ matrix.ruby }}
+    runs-on: ${{ matrix.os }}
+    env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
+      BUNDLE_GEMFILE: "${{ matrix.os == 'windows-latest' && 'Gemfile-win' || 'Gemfile' }}"
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
     strategy:
       matrix:
+        os:
+          # - windows-latest - unable to install ruby-llvm
+          - macos-latest
+          - ubuntu-latest
         ruby:
-          - '3.0.2'
+          - '3.3'
 
     steps:
       - uses: actions/checkout@v4
+      - if: matrix.os == 'llvm-17-dev'
+        run: sudo apt update && sudo apt install -y --no-install-recommends llvm-17-dev
+      - if: matrix.os == 'macos-latest'
+        run: brew update && brew install llvm@17 && brew link llvm@17 --force
+      - if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby }}
+          ruby-version: ${{ matrix.ruby }} # Not needed with a .ruby-version, .tool-versions or mise.toml
           bundler-cache: true
+          rubygems: 3.6.9
       - name: Run the default task
         run: bundle exec rake

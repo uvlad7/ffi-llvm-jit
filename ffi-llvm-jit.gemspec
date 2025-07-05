@@ -47,7 +47,7 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'benchmark-ips', '~> 2.14'
   spec.add_development_dependency 'strlen', '~> 1.0'
   # Only because its major version matches required llvm version and I have llvm-17 installed
-  spec.add_development_dependency 'ruby-llvm', '~> 17'
+  spec.add_development_dependency 'ruby-llvm', (Gem.win_platform? ? '~> 20' : '~> 17')
 
   spec.add_development_dependency 'ffi-compiler', '~> 1.3'
 
