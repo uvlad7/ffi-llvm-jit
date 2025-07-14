@@ -146,10 +146,10 @@ __attribute__((always_inline)) VALUE ffi_llvm_jit_bool_to_value(bool arg) {
 // TODO: Since we generate code for every function, we could easily support safe
 // non-nullable arguments with almost no overhead.
 __attribute__((always_inline)) char * ffi_llvm_jit_value_to_string(VALUE arg) {
-    return NIL_P(arg) ? NULL : StringValueCStr(arg);
+    return unlikely(NIL_P(arg)) ? NULL : StringValueCStr(arg);
 }
 __attribute__((always_inline)) VALUE ffi_llvm_jit_string_to_value(char * arg) {
-    return arg != NULL ? rb_str_new2(arg) : Qnil;
+    return likely(arg != NULL) ? rb_str_new2(arg) : Qnil;
 }
 //     /** The function takes a variable number of arguments */
 //     NATIVE_VARARGS,
