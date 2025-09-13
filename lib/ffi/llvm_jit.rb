@@ -2,6 +2,7 @@
 
 require 'ffi'
 require 'llvm/core'
+require 'llvm/linker'
 require 'llvm/execution_engine'
 
 require_relative 'llvm_jit/version'
@@ -22,6 +23,8 @@ module FFI
       LLVM_MOD = LLVM::Module.parse_bitcode(
         File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
+      # p LLVM_MOD.verify
+
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
 
@@ -189,7 +192,7 @@ module FFI
         fn_ptr_type = LLVM.Pointer(fn_type)
         # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
         func_ptr = llvm_mod.globals.add(POINTER, '') do |var|
-          var.linkage = :private
+          # var.linkage = :external
           var.global_constant = true
           var.unnamed_addr = true
           var.initializer = POINTER.from_i(c_address)
@@ -207,7 +210,7 @@ module FFI
               b.call(LLVM_MOD.functions["ffi_llvm_jit_value_to_#{arg_type}"], param)
             end
 
-            func_ptr_val = b.load2(fn_ptr_type, b.int2ptr(func_ptr, fn_ptr_type))
+            func_ptr_val = b.load2(fn_ptr_type, func_ptr)
             # See value.rb (Function) and builder.rb (Builder#call2)
             # func_ptr_val is actually an Instruction, can't set call_conv
             res = b.call2(fn_type, func_ptr_val, *converted_params)
@@ -221,6 +224,11 @@ module FFI
             )
           end
         end
+        # rb_func.linkage = :external
+        # llvm_mod.link_into(LLVM_MOD)
+        # p rb_func.verify
+        # p llvm_mod.verify
+        # p LLVM_MOD.verify
         # rb_func.dump
 
         # Ruby llvm_mod object isn't kept arount and might be GCed, but
