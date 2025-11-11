@@ -23,7 +23,7 @@ module FFI
       LLVM_MOD = LLVM::Module.parse_bitcode(
         File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
-      # p LLVM_MOD.verify
+      LLVM_MOD.verify!
 
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
@@ -60,7 +60,7 @@ module FFI
         # anyway, they are just aliases
         float: LLVM::Float,
         double: LLVM::Double,
-        bool: LLVM.const_get("Int#{FFI.type_size(:bool) * 8}"),
+        bool: LLVM::Int1,
         string: LLVM.Pointer(LLVM::Int8),
       }.freeze
 
@@ -207,7 +207,10 @@ module FFI
         ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |b|
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
-              b.call(LLVM_MOD.functions["ffi_llvm_jit_value_to_#{arg_type}"], param)
+              b.call(
+                link_external_function(llvm_mod, "ffi_llvm_jit_value_to_#{arg_type}"),
+                param,
+              )
             end
 
             func_ptr_val = b.load2(fn_ptr_type, func_ptr)
@@ -217,18 +220,19 @@ module FFI
             res.call_conv = call_conv if call_conv
             b.ret(
               if ret_type_name == :void
-                b.load2(VALUE, LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
+                b.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
               else
-                b.call(LLVM_MOD.functions["ffi_llvm_jit_#{ret_type_name}_to_value"], res)
+                b.call(
+                  link_external_function(llvm_mod, "ffi_llvm_jit_#{ret_type_name}_to_value"),
+                  res,
+                )
               end,
             )
           end
         end
-        # rb_func.linkage = :external
-        # llvm_mod.link_into(LLVM_MOD)
-        # p rb_func.verify
-        # p llvm_mod.verify
-        # p LLVM_MOD.verify
+        rb_func.verify!
+        llvm_mod.verify!
+        LLVM_MOD.verify!
         # rb_func.dump
 
         # Ruby llvm_mod object isn't kept arount and might be GCed, but
@@ -242,6 +246,31 @@ module FFI
         # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
         attach_rb_wrap_function(rb_name.to_s, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
         nil
+      end
+
+      def link_external_function(mod, name)
+        unless mod.functions[name]
+          external_function = LLVM_MOD.functions[name]
+          func = mod.functions.add(name, external_function.function_type)
+          func.linkage = :external
+          func.call_conv = external_function.call_conv
+          external_function.function_attributes.to_a.each { |attr| func.add_attribute(attr, -1) }
+          external_function.return_attributes.to_a.each { |attr| func.add_attribute(attr, 0) }
+          external_function.params.size.times do |idx|
+            external_function.param_attributes(idx + 1).to_a.each do |attr|
+              func.add_attribute(attr, idx + 1)
+            end
+          end
+        end
+        mod.functions[name]
+      end
+
+      def link_external_global(mod, name)
+        unless mod.globals[name]
+          glob = mod.globals.add(LLVM_MOD.globals[name].type, name)
+          glob.linkage = :external
+        end
+        mod.globals[name]
       end
 
       # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
