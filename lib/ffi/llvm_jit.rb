@@ -233,6 +233,8 @@ module FFI
         rb_func.verify!
         llvm_mod.verify!
         LLVM_MOD.verify!
+        # TODO: investigate what's more performant: function linking or link module into
+        # LLVM_MOD.link_into(llvm_mod)
         # rb_func.dump
 
         # Ruby llvm_mod object isn't kept arount and might be GCed, but
