@@ -42,11 +42,12 @@ task default: %i[clobber compile spec rubocop yard]
 
 # Similar to https://gist.github.com/tenderworks/f4cbb60f2c0dc3ab334eb73fec36f702
 # rubocop:disable Metrics/BlockLength, Style/Documentation, Lint/ConstantDefinitionInBlock, Naming/MethodParameterName
-task bench: :compile do
+task bench: [:compile, 'spec_compile:default'] do
   require 'ffi'
   require 'benchmark/ips'
   require 'strlen'
   require 'ffi/llvm_jit'
+  require 'ffi-compiler/loader'
 
   module A
     extend FFI::Library
@@ -78,6 +79,31 @@ task bench: :compile do
     x.report('strlen-ffi-llvm-jit') { C.strlen(str) }
     x.compare!
   end
+
+  module D
+    extend FFI::Library
+    ffi_lib FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './spec/ext/ffi_llvm_jit_spec')
+
+    attach_function :factorial, [:uint], :ulong
+  end
+
+  module E
+    extend FFI::LLVMJIT::Library
+    ffi_lib FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './spec/ext/ffi_llvm_jit_spec')
+
+    attach_llvm_jit_function :factorial, [:uint], :ulong
+  end
+
+  Benchmark.ips do |x|
+    x.report('factorial(100) ffi') { D.factorial(100) }
+    x.report('factorial(100) ffi-llvm-jit') { E.factorial(100) }
+    x.compare!
+  end
+  Benchmark.ips do |x|
+    x.report('factorial(42000) ffi') { D.factorial(42000) }
+    x.report('factorial(42000) ffi-llvm-jit') { E.factorial(42000) }
+    x.compare!
+  end
 end
 # rubocop:enable Metrics/BlockLength, Style/Documentation, Lint/ConstantDefinitionInBlock, Naming/MethodParameterName
 
@@ -101,3 +127,31 @@ end
 #  strlen-ffi-llvm-jit: 12064294.8 i/s - 1.41x  slower
 #          strlen-cext: 11671739.9 i/s - 1.46x  slower
 #           strlen-ffi:  5632971.7 i/s - 3.03x  slower
+
+# ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [x86_64-linux]
+# Warming up --------------------------------------
+#   factorial(100) ffi   219.370k i/100ms
+# factorial(100) ffi-llvm-jit
+#                        281.576k i/100ms
+# Calculating -------------------------------------
+#   factorial(100) ffi      2.178M (± 2.9%) i/s  (459.19 ns/i) -     10.968M in   5.041112s
+# factorial(100) ffi-llvm-jit
+#                           2.846M (± 1.6%) i/s  (351.40 ns/i) -     14.360M in   5.047532s
+
+# Comparison:
+# factorial(100) ffi-llvm-jit:  2845732.7 i/s
+#   factorial(100) ffi:  2177744.0 i/s - 1.31x  slower
+
+# ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [x86_64-linux]
+# Warming up --------------------------------------
+# factorial(42000) ffi   729.000 i/100ms
+# factorial(42000) ffi-llvm-jit
+#                        778.000 i/100ms
+# Calculating -------------------------------------
+# factorial(42000) ffi      7.263k (± 2.0%) i/s  (137.68 μs/i) -     36.450k in   5.020507s
+# factorial(42000) ffi-llvm-jit
+#                           7.590k (± 2.4%) i/s  (131.75 μs/i) -     38.122k in   5.025649s
+
+# Comparison:
+# factorial(42000) ffi-llvm-jit:     7589.9 i/s
+# factorial(42000) ffi:     7263.2 i/s - 1.04x  slower

@@ -36,3 +36,12 @@ void __stdcall test_stdcall_many_params(long *a1, char a2, short int a3, int a4,
                 *a1 = 42L;
 }
 #endif
+
+unsigned long int factorial(unsigned int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    else {
+        return n * factorial(n - 1);
+    }
+}
