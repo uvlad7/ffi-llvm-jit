@@ -100,8 +100,8 @@ task bench: [:compile, 'spec_compile:default'] do
     x.compare!
   end
   Benchmark.ips do |x|
-    x.report('factorial(42000) ffi') { D.factorial(42000) }
-    x.report('factorial(42000) ffi-llvm-jit') { E.factorial(42000) }
+    x.report('factorial(42000) ffi') { D.factorial(42_000) }
+    x.report('factorial(42000) ffi-llvm-jit') { E.factorial(42_000) }
     x.compare!
   end
 end
