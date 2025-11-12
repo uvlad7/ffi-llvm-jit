@@ -192,7 +192,7 @@ module FFI
         fn_ptr_type = LLVM.Pointer(fn_type)
         # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
         func_ptr = llvm_mod.globals.add(POINTER, '') do |var|
-          # var.linkage = :external
+          var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
           var.initializer = POINTER.from_i(c_address)
