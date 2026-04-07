@@ -1,5 +1,24 @@
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+typedef struct {
+    int32_t x;
+    int32_t y;
+} spec_point_t;
+
+spec_point_t* spec_make_point(int32_t x, int32_t y) {
+    spec_point_t *p = malloc(sizeof(spec_point_t));
+    p->x = x;
+    p->y = y;
+    return p;
+}
+
+
+int32_t spec_point_sum(spec_point_t *p) {
+    return p->x + p->y;
+}
 
 signed int spec_bool_param(bool val)
 {

@@ -1,5 +1,8 @@
-PATH
-  remote: ../ffi
+GIT
+  remote: https://github.com/uvlad7/ffi.git
+  revision: 141a186d43f59ea35a8dc0dd17efdf4c845da5a6
+  branch: ffi_llvm_gem_integration
+  submodules: true
   specs:
     ffi (1.17.2)
 

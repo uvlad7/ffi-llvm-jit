@@ -10,6 +10,12 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     end
   end
 
+  let(:point_struct) do
+    Class.new(FFI::Struct) do
+      layout :x, :int32, :y, :int32
+    end
+  end
+
   let(:stdcall_jitlib) do
     Module.new.tap do |mod|
       mod.extend described_class::Library
@@ -230,6 +236,25 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     ptr = jitlib.strdup('hello')
     expect(ptr).to be_a(FFI::Pointer)
     expect(ptr.read_string).to eq('hello')
+  end
+
+  it 'supports struct return value' do
+    # TODO: auto_prt (mapped), by_ref (mapped), by_value (StructByValue)
+    jitlib.attach_llvm_jit_function :spec_make_point, %i[int32 int32], point_struct
+    ptr = jitlib.spec_make_point(4, 2)
+    expect(ptr).to be_a(FFI::Pointer)
+    point = point_struct.new(ptr)
+    expect(point[:x]).to eq(4)
+    expect(point[:y]).to eq(2)
+  end
+
+  it 'supports struct args' do
+    # TODO: by_ref (mapped), by_value (StructByValue)
+    jitlib.attach_llvm_jit_function :spec_point_sum, [point_struct], :int32
+    point = point_struct.new
+    point[:x] = 10
+    point[:y] = 32
+    expect(jitlib.spec_point_sum(point)).to eq(42)
   end
 
   it 'supports stdcall' do
