@@ -42,7 +42,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     ret = jitlib.attach_function :printf, %i[string varargs], :int
     expect(ret).to be_a(FFI::VariadicInvoker)
 
-    res = jitlib.attach_function :memcpy, [:buffer_out, :buffer_in, :size_t], :void
+    cb = FFI::CallbackInfo.new(FFI.find_type(:int), [FFI.find_type(:pointer), FFI.find_type(:pointer)])
+    res = jitlib.attach_function :qsort, [:pointer, :size_t, :size_t, cb], :void
     expect(res).to be_a(FFI::Function)
 
     res = jitlib.attach_function :strlen4, :strlen, [:string], :size_t, blocking: true
@@ -203,6 +204,25 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     src.put_bytes(0, "\x01\x02\x03\x04")
     jitlib.memcpy(dst, src, 4)
     expect(dst.get_bytes(0, 4)).to eq("\x01\x02\x03\x04")
+  end
+
+  it 'supports buffer args' do
+    jitlib.attach_llvm_jit_function :memcpy, %i[buffer_out buffer_in size_t], :void
+    src = FFI::Buffer.new_in(:char, 4)
+    dst = FFI::Buffer.new_out(:char, 4)
+    src.put_bytes(0, "\x01\x02\x03\x04")
+    jitlib.memcpy(dst, src, 4)
+    expect(dst.get_bytes(0, 4)).to eq("\x01\x02\x03\x04")
+  end
+
+  it 'supports buffer_inout args' do
+    jitlib.attach_llvm_jit_function :strcat, %i[buffer_inout buffer_in], :pointer
+    dst = FFI::Buffer.new_inout(:char, 12)
+    src = FFI::Buffer.new_in(:uint8, 7)
+    dst.put_string(0, 'hello')
+    src.put_string(0, ' world')
+    jitlib.strcat(dst, src)
+    expect(dst.get_string(0)).to eq('hello world')
   end
 
   it 'supports pointer return values' do
