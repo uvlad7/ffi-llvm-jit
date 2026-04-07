@@ -25,9 +25,10 @@ module FFI
       )
       LLVM_MOD.verify!
 
-      # Register FFI pointer converter addresses with LLVM's global symbol table
+      # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
-      FFI.send(:init_llvm_jit_pointer_handlers)
+      FFI.send(:init_llvm_jit_to_native_handlers)
+      FFI.send(:init_llvm_jit_from_native_handlers)
 
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
@@ -75,6 +76,9 @@ module FFI
         bool: LLVM::Int1,
         string: LLVM.Pointer(LLVM::Int8),
         pointer: LLVM.Pointer(LLVM::Int8),
+        buffer_in: LLVM.Pointer(LLVM::Int8),
+        buffer_out: LLVM.Pointer(LLVM::Int8),
+        buffer_inout: LLVM.Pointer(LLVM::Int8),
       }.freeze
 
       private_constant :POINTER, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
