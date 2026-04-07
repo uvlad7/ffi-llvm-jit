@@ -20,12 +20,15 @@ extern void *ffi_llvm_jit_value_to_buffer_out(VALUE arg);
 extern void *ffi_llvm_jit_value_to_buffer_inout(VALUE arg);
 extern VALUE ffi_llvm_jit_pointer_to_value(void *ptr);
 
+extern void ffi_llvm_jit_save_errno(void);
+
 __attribute__((used)) static void *llvm_keepalive[] = {
     (void *)ffi_llvm_jit_value_to_pointer,
     (void *)ffi_llvm_jit_value_to_buffer_in,
     (void *)ffi_llvm_jit_value_to_buffer_out,
     (void *)ffi_llvm_jit_value_to_buffer_inout,
     (void *)ffi_llvm_jit_pointer_to_value,
+    (void *)ffi_llvm_jit_save_errno,
 };
 
 

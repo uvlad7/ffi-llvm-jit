@@ -234,6 +234,8 @@ module FFI
             # func_ptr_val is actually an Instruction, can't set call_conv
             res = b.call2(fn_type, func_ptr_val, *converted_params)
             res.call_conv = call_conv if call_conv
+            # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
+            b.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
             b.ret(
               if ret_type_name == :void
                 b.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))

@@ -153,6 +153,12 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(result).to eq('24')
   end
 
+  it 'saves errno' do
+    jitlib.attach_llvm_jit_function :open, %i[string int], :int
+    expect(jitlib.open('does_not_exist', 0)).to eq(-1)
+    expect(FFI.errno).to eq(Errno::ENOENT::Errno)
+  end
+
   it 'supports long long' do
     jitlib.attach_llvm_jit_function :strtoull, %i[string string int], :ulong_long
     jitlib.attach_llvm_jit_function :strtoll, %i[string string int], :long_long
