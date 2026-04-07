@@ -42,7 +42,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     ret = jitlib.attach_function :printf, %i[string varargs], :int
     expect(ret).to be_a(FFI::VariadicInvoker)
 
-    res = jitlib.attach_function :free, [:pointer], :void
+    res = jitlib.attach_function :memcpy, [:buffer_out, :buffer_in, :size_t], :void
     expect(res).to be_a(FFI::Function)
 
     res = jitlib.attach_function :strlen4, :strlen, [:string], :size_t, blocking: true
@@ -57,6 +57,10 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.attach_function(:strlen7, :strlen, [:string], :size_t)).to be_nil
     jitlib.typedef :size_t, :length
     expect(jitlib.attach_function(:strlen8, :strlen, [:string], :size_t)).to be_a(FFI::Function)
+  end
+
+  it 'detects explicit type_map option' do
+    expect(jitlib.attach_function(:strlen_tm, :strlen, [:string], :size_t, type_map: {})).to be_a(FFI::Function)
   end
 
   it 'detects enums' do
@@ -190,6 +194,22 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_uchar_to_downcase('A'.ord - 256).chr).to eq('a')
     expect(jitlib.spec_char_to_downcase(127)).to eq(-97)
     expect(jitlib.spec_uchar_to_downcase(127)).to eq(159)
+  end
+
+  it 'supports pointer args' do
+    jitlib.attach_llvm_jit_function :memcpy, %i[pointer pointer size_t], :void
+    src = FFI::MemoryPointer.new(:uint8, 4)
+    dst = FFI::MemoryPointer.new(:uint8, 4)
+    src.put_bytes(0, "\x01\x02\x03\x04")
+    jitlib.memcpy(dst, src, 4)
+    expect(dst.get_bytes(0, 4)).to eq("\x01\x02\x03\x04")
+  end
+
+  it 'supports pointer return values' do
+    jitlib.attach_llvm_jit_function :strdup, [:pointer], :pointer
+    ptr = jitlib.strdup('hello')
+    expect(ptr).to be_a(FFI::Pointer)
+    expect(ptr.read_string).to eq('hello')
   end
 
   it 'supports stdcall' do

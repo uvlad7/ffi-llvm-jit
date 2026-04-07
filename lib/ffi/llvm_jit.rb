@@ -25,8 +25,20 @@ module FFI
       )
       LLVM_MOD.verify!
 
+      # Register FFI pointer converter addresses with LLVM's global symbol table
+      # before JIT engine creation so they are resolved on first compilation.
+      FFI.send(:init_llvm_jit_pointer_handlers)
+
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
+
+      # Validate all external declarations in the bitcode module are resolved.
+      # LLVM intrinsics (llvm.*) are handled natively by the JIT and not in the symbol table.
+      unresolved = LLVM_MOD.functions.select do |f|
+        f.declaration?.nonzero? && !f.name.start_with?('llvm.') &&
+          LLVM::C.search_for_address_of_symbol(f.name).null?
+      end
+      raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
 
       private_constant :LLVM_MOD, :LLVM_ENG
 
@@ -62,6 +74,7 @@ module FFI
         double: LLVM::Double,
         bool: LLVM::Int1,
         string: LLVM.Pointer(LLVM::Int8),
+        pointer: LLVM.Pointer(LLVM::Int8),
       }.freeze
 
       private_constant :POINTER, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
