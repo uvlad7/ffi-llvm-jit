@@ -37,5 +37,8 @@ jobs:
           ruby-version: ${{ matrix.ruby }} # Not needed with a .ruby-version, .tool-versions or mise.toml
           bundler-cache: true
           rubygems: 3.6.9
+      - name: Temporary trick for github gem installation
+        run: |
+          echo "gem 'ffi', github: 'uvlad7/ffi', branch: 'ffi_llvm_gem_integration', submodules: true" >> Gemfile && bundle config set frozen false && bundle install
       - name: Run the default task
         run: bundle exec rake

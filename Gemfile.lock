@@ -1,11 +1,3 @@
-GIT
-  remote: https://github.com/uvlad7/ffi.git
-  revision: 141a186d43f59ea35a8dc0dd17efdf4c845da5a6
-  branch: ffi_llvm_gem_integration
-  submodules: true
-  specs:
-    ffi (1.17.2)
-
 PATH
   remote: .
   specs:
@@ -21,6 +13,8 @@ GEM
     byebug (11.1.3)
     coderay (1.1.3)
     diff-lcs (1.5.1)
+    ffi (1.17.2)
+    ffi (1.17.2-x86_64-linux-gnu)
     ffi-compiler (1.3.2)
       ffi (>= 1.15.5)
       rake
@@ -88,7 +82,6 @@ PLATFORMS
 
 DEPENDENCIES
   benchmark-ips (~> 2.14)
-  ffi!
   ffi-compiler (~> 1.3)
   ffi-llvm-jit!
   pry (= 0.14.2)
