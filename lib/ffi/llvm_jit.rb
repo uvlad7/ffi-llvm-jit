@@ -161,6 +161,8 @@ module FFI
         }
 
         @blocking = false
+        # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
+        # Here we do the same and don't need to guard against type_map
         options.merge!(opts) if opts.is_a?(Hash)
 
         [mname, cname, arg_types, ret_type, options]
@@ -173,10 +175,7 @@ module FFI
         # but we'd still need to know use libffi to create varargs
         ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
-        if !options[:type_map].nil? || options[:blocking] || options[:enums] ||
-           ret_type_name.nil? || arg_type_names.any?(&:nil?)
-          return false
-        end
+        return false if options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
         function_handle = ffi_libraries.find do |lib|
           fn = nil

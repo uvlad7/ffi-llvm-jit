@@ -54,20 +54,23 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
     res = jitlib.attach_function :strlen4, :strlen, [:string], :size_t, blocking: true
     expect(res).to be_a(FFI::Function)
-
-    expect(jitlib.attach_function(:strlen5, :strlen, [:string], :size_t)).to be_nil
-    jitlib.typedef :size_t, :length
-    expect(jitlib.attach_function(:strlen6, :strlen, [:string], :size_t)).to be_a(FFI::Function)
   end
 
-  it 'detects typedefs' do
-    expect(jitlib.attach_function(:strlen7, :strlen, [:string], :size_t)).to be_nil
+  it 'allows typedefs' do
+    expect(jitlib.attach_llvm_jit_function(:strlen5, :strlen, [:string], :size_t)).to be_nil
     jitlib.typedef :size_t, :length
-    expect(jitlib.attach_function(:strlen8, :strlen, [:string], :size_t)).to be_a(FFI::Function)
+    expect(jitlib.attach_llvm_jit_function(:strlen6, :strlen, [:string], :size_t)).to be_nil
+    expect(jitlib.attach_llvm_jit_function(:strlen7, :strlen, [:string], :length)).to be_nil
   end
 
-  it 'detects explicit type_map option' do
-    expect(jitlib.attach_function(:strlen_tm, :strlen, [:string], :size_t, type_map: {})).to be_a(FFI::Function)
+  it 'ignores explicit type_map option' do
+    expect(jitlib.attach_llvm_jit_function(:strlen_tm, :strlen, [:string], :size_t, type_map: {})).to be_nil
+    expect do
+      jitlib.attach_llvm_jit_function(
+        :strlen_tm, :strlen, [:string], :length,
+        type_map: { length: FFI::TypeDefs[:size_t] },
+      )
+    end.to raise_error(TypeError, "unable to resolve type 'length'")
   end
 
   it 'detects enums' do
