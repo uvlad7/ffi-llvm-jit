@@ -6,3 +6,5 @@ source 'https://rubygems.org'
 gemspec
 
 gem 'ffi', github: 'uvlad7/ffi', branch: 'ffi_llvm_gem_integration', submodules: true
+# Has needs to be here to be installed after ffi
+gem 'ruby-llvm', (Gem.win_platform? ? '~> 20' : '~> 17')
