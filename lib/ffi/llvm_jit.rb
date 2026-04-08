@@ -74,11 +74,11 @@ module FFI
         float: LLVM::Float,
         double: LLVM::Double,
         bool: LLVM::Int1,
-        string: LLVM.Pointer(LLVM::Int8),
-        pointer: LLVM.Pointer(LLVM::Int8),
-        buffer_in: LLVM.Pointer(LLVM::Int8),
-        buffer_out: LLVM.Pointer(LLVM::Int8),
-        buffer_inout: LLVM.Pointer(LLVM::Int8),
+        string: LLVM.Pointer(LLVM.const_get("Int#{FFI.type_size(:char) * 8}")),
+        pointer: LLVM.Pointer(LLVM.Void),
+        buffer_in: LLVM.Pointer(LLVM.Void),
+        buffer_out: LLVM.Pointer(LLVM.Void),
+        buffer_inout: LLVM.Pointer(LLVM.Void),
       }.freeze
 
       private_constant :POINTER, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
