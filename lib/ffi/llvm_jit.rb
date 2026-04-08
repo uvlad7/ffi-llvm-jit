@@ -169,7 +169,7 @@ module FFI
       end
 
       def attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
-        # TODO: support stdcall convention (rb_func.call_conv=)
+        # TODO: support call conventions other than stdcall (rb_func.call_conv=)
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
         # but we'd still need to know use libffi to create varargs
@@ -190,7 +190,7 @@ module FFI
         end
         raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name)) unless function_handle
 
-        call_conv = options[:convention] == :stdcall ? LLVM_STDCALL : nil
+        call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
         attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
         # singleton_class.alias_method rb_name, jit_name
         # alias_method rb_name, jit_name
@@ -232,6 +232,8 @@ module FFI
             func_ptr_val = b.load2(fn_ptr_type, func_ptr)
             # See value.rb (Function) and builder.rb (Builder#call2)
             # func_ptr_val is actually an Instruction, can't set call_conv
+            # Note for future: in FFI struct layout redefinition doesn't change ffiParameterTypes of
+            #   already attached functions
             res = b.call2(fn_type, func_ptr_val, *converted_params)
             res.call_conv = call_conv if call_conv
             # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
