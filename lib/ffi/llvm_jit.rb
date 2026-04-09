@@ -27,8 +27,9 @@ module FFI
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
-      FFI.send(:init_llvm_jit_to_native_handlers)
-      FFI.send(:init_llvm_jit_from_native_handlers)
+      reg_converter = proc { |fn_name, fn_ptr| LLVM::C.add_symbol("ffi_llvm_jit_#{fn_name}", fn_ptr) }
+      FFI.send(:value_to_native_converters, &reg_converter)
+      FFI.send(:native_to_value_converters, &reg_converter)
 
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
@@ -52,8 +53,8 @@ module FFI
       # bits = FFI.type_size(:int) * 8
       # ::LLVM::Int = const_get("Int#{bits}")
       # see @LLVMinst inttoptr
-      POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
-      VALUE = POINTER
+      INTPTR = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
+      VALUE = INTPTR
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
         void: LLVM.Void,
@@ -82,7 +83,7 @@ module FFI
         buffer_inout: LLVM.Pointer(LLVM.Void),
       }.freeze
 
-      private_constant :POINTER, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
+      private_constant :INTPTR, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -202,25 +203,24 @@ module FFI
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
-        fn_type = LLVM.Function(
+        func_t = LLVM.Function(
           arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] },
           LLVM_TYPES[ret_type_name],
         )
-        fn_ptr_type = LLVM.Pointer(fn_type)
+        func_ptr_t = LLVM.Pointer(func_t)
         # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
-        func_ptr = llvm_mod.globals.add(POINTER, '') do |var|
+        func_ptr = llvm_mod.globals.add(func_ptr_t, '') do |var|
           var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
-          var.initializer = POINTER.from_i(c_address)
+          var.initializer = INTPTR.from_i(c_address).int_to_ptr(func_ptr_t)
         end
 
         # Something is wrong in case of name collizion; and even though you can
         # update rb_func.name=, function_address is still zero
         # Upd: It happens if functions are the same even though their names are different
-
         rb_func = llvm_mod.functions.add(
-          :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (arg_type_names.size + 1), VALUE,
+          :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (1 + arg_type_names.size), VALUE,
         ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |b|
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
@@ -230,10 +230,10 @@ module FFI
               )
             end
 
-            func_ptr_val = b.load2(fn_ptr_type, func_ptr)
+            func_ptr_val = b.load(func_ptr)
             # See value.rb (Function) and builder.rb (Builder#call2)
             # func_ptr_val is actually an Instruction, can't set call_conv
-            res = b.call2(fn_type, func_ptr_val, *converted_params)
+            res = b.call2(func_t, func_ptr_val, *converted_params)
             res.call_conv = call_conv if call_conv
             # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
             b.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
