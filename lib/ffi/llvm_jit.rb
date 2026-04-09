@@ -32,6 +32,7 @@ module FFI
 
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
+      LLVM_MUTEX = Mutex.new
 
       # Validate all external declarations in the bitcode module are resolved.
       # LLVM intrinsics (llvm.*) are handled natively by the JIT and not in the symbol table.
@@ -41,7 +42,7 @@ module FFI
       end
       raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
 
-      private_constant :LLVM_MOD, :LLVM_ENG
+      private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX
 
       # LLVM_ENG.dispose is never called
       # https://llvm.org/doxygen/group__LLVMCTarget.html#gaaa9ce583969eb8754512e70ec4b80061
@@ -232,8 +233,6 @@ module FFI
             func_ptr_val = b.load2(fn_ptr_type, func_ptr)
             # See value.rb (Function) and builder.rb (Builder#call2)
             # func_ptr_val is actually an Instruction, can't set call_conv
-            # Note for future: in FFI struct layout redefinition doesn't change ffiParameterTypes of
-            #   already attached functions
             res = b.call2(fn_type, func_ptr_val, *converted_params)
             res.call_conv = call_conv if call_conv
             # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
@@ -242,6 +241,8 @@ module FFI
               if ret_type_name == :void
                 b.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
               else
+                # Note for future: in FFI struct layout redefinition doesn't change ffiParameterTypes of
+                #   already attached functions
                 b.call(
                   link_external_function(llvm_mod, "ffi_llvm_jit_#{ret_type_name}_to_value"),
                   res,
@@ -250,23 +251,26 @@ module FFI
             )
           end
         end
-        rb_func.verify!
-        llvm_mod.verify!
-        LLVM_MOD.verify!
-        # TODO: investigate what's more performant: function linking or link module into
-        # LLVM_MOD.link_into(llvm_mod)
-        # rb_func.dump
 
-        # Ruby llvm_mod object isn't kept arount and might be GCed, but
-        # it doesn't call +dispose+ automatically, so it's ok.
-        # Note that in function name +llvm_mod.hash+ is used and it
-        # mustn't be reused until the module is disposed, unlike
-        # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
-        LLVM_ENG.modules.add(llvm_mod)
-        # rb_func.name isn't always the same as rb_name, in case of name clashes
-        # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
-        # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
-        attach_rb_wrap_function(rb_name.to_s, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
+        rb_func_addr = LLVM_MUTEX.synchronize do
+          # TODO: investigate what's more performant: function linking or link module into
+          # LLVM_MOD.link_into(llvm_mod)
+          # rb_func.dump
+
+          # Ruby llvm_mod object isn't kept arount and might be GCed, but
+          # it doesn't call +dispose+ automatically, so it's ok.
+          # Note that in function name +llvm_mod.hash+ is used and it
+          # mustn't be reused until the module is disposed, unlike
+          # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
+          LLVM_ENG.modules.add(llvm_mod)
+          rb_func.verify!
+          llvm_mod.verify!
+          # rb_func.name isn't always the same as rb_name, in case of name clashes
+          # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
+          # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
+          LLVM_ENG.function_address(rb_func.name)
+        end
+        attach_rb_wrap_function(rb_name.to_s, rb_func_addr, arg_type_names.size)
         nil
       end
 

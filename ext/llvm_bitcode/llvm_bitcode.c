@@ -163,3 +163,7 @@ __attribute__((always_inline)) VALUE ffi_llvm_jit_string_to_value(char * arg) {
 //     /** Custom native type */
 //     NATIVE_MAPPED,
 // } NativeType;
+
+__attribute__((always_inline)) void ffi_llvm_jit_rb_gc_guard(VALUE v) {
+    RB_GC_GUARD(v);
+}
