@@ -118,79 +118,38 @@ module FFI
 
       # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
-      # @note Return type doesn't match the original method, but it's usually not used
-      # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
-      def attach_function(name, func, args, returns = nil, options = nil)
-        mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
-        return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
-
-        super(mname, cname, arg_types, ret_type, options)
-      end
-
       # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
-        # TODO: support LLVM call_conv; not that function_names must be patched for that
-        # (they also forgot an underscore on Windows for cdecl)
-        # https://en.wikipedia.org/wiki/Name_mangling#C
-        # (see core_ffi.rb and https://llvm.org/doxygen/namespacellvm_1_1CallingConv.html)
-        mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
-        return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
-
-        raise NotImplementedError, "Cannot create JIT function #{name}"
+        mname, cname, arg_types, ret_type, options = convert_attach_function_params(name, func, args, returns, options)
+        function_handle = find_function_handle(cname, arg_types)
+        attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: true)
       end
 
       private
 
-      def convert_params(name, func, args, returns, options)
-        mname = name
-        a2 = func
-        a3 = args
-        a4 = returns
-        a5 = options
-        cname, arg_types, ret_type, opts = if a4 && (a2.is_a?(String) || a2.is_a?(Symbol))
-                                             [a2, a3, a4, a5]
-                                           else
-                                             [mname.to_s, a2, a3, a4]
-                                           end
-        # Convert :foo to the native type
-        arg_types = arg_types.map { |e| find_type(e) }
-        options = {
-          convention: ffi_convention,
-          type_map: defined?(@ffi_typedefs) ? @ffi_typedefs : nil,
-          blocking: defined?(@blocking) && @blocking,
-          enums: defined?(@ffi_enums) ? @ffi_enums : nil,
-        }
+      # @note Return type doesn't match the original method, but it's usually not used
+      # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
+      def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
+        return if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+        raise NotImplementedError, "Cannot create JIT function #{mname}" if jit_only
 
-        @blocking = false
-        # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
-        # Here we do the same and don't need to guard against type_map
-        options.merge!(opts) if opts.is_a?(Hash)
-
-        [mname, cname, arg_types, ret_type, options]
+        super(function_handle, mname, arg_types, ret_type, options)
       end
 
-      def attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
+      def attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+        unknown_options = options.keys - %i[convention type_map blocking enums]
+        return false unless unknown_options.empty?
+
         # TODO: support call conventions other than stdcall (rb_func.call_conv=)
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
         # but we'd still need to know use libffi to create varargs
         ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
+        # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
+        # Here we do the same and don't need to guard against type_map
         return false if options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
-
-        function_handle = ffi_libraries.find do |lib|
-          fn = nil
-          begin
-            function_names(cname, arg_types).find do |fname|
-              fn = lib.find_function(fname)
-            end
-          rescue LoadError
-            # Ignored
-          end
-          break fn if fn
-        end
-        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name)) unless function_handle
 
         call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
         attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
