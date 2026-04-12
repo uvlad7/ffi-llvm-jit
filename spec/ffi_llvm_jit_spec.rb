@@ -49,11 +49,13 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(ret).to be_a(FFI::VariadicInvoker)
 
     cb = FFI::CallbackInfo.new(FFI.find_type(:int), [FFI.find_type(:pointer), FFI.find_type(:pointer)])
-    res = jitlib.attach_function :qsort, [:pointer, :size_t, :size_t, cb], :void
-    expect(res).to be_a(FFI::Function)
+    expect do
+      jitlib.attach_llvm_jit_function :qsort, [:pointer, :size_t, :size_t, cb], :void
+    end.to raise_error(NotImplementedError)
 
-    res = jitlib.attach_function :strlen4, :strlen, [:string], :size_t, blocking: true
-    expect(res).to be_a(FFI::Function)
+    expect do
+      jitlib.attach_llvm_jit_function :strlen4, :strlen, [:string], :size_t, blocking: true
+    end.to raise_error(NotImplementedError)
   end
 
   it 'allows typedefs' do
@@ -76,7 +78,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   it 'supports enums' do
     # partial support - not as typedefs, for that dataconverter support is needed
     jitlib.enum [:a, :b, 2]
-    expect(jitlib.attach_function(:spec_enum, %i[int string], :int)).to be_nil
+    jitlib.attach_llvm_jit_function(:spec_enum, %i[int string], :int)
     expect(jitlib.spec_enum(:a, nil)).to eq(0)
     expect(jitlib.spec_enum(:b, nil)).to eq(2)
     expect(jitlib.spec_enum(1, nil)).to eq(1)
@@ -93,7 +95,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
     enums = FFI::Enums.new
     enums << FFI::Enum.new([:v, 42])
-    expect(jitlib.attach_function(:spec_enum_cust, :spec_enum, %i[int string], :int, enums: enums)).to be_nil
+    expect(jitlib.attach_llvm_jit_function(:spec_enum_cust, :spec_enum, %i[int string], :int, enums: enums)).to be_nil
     expect do
       jitlib.spec_enum_cust(:c, nil)
     end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
@@ -158,9 +160,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect do
       jitlib.attach_llvm_jit_function :memset, %i[string void size_t], :void
     end.to raise_error(NotImplementedError)
-    res = jitlib.attach_function :memset, %i[string void size_t], :void
-    expect(res).to be_a(FFI::Function)
-    # Surprisignly, they allow that, but
+    # Surprisignly, FFI allows that, but
     #   jitlib.memset("", nil, 0)
     # would raise
     #   ArgumentError: Invalid parameter type: 0
@@ -305,9 +305,9 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       expect(described_class::Library.const_get(:LLVM_STDCALL)).to be_nil
       skip "stdcall isn't supported on #{FFI::Platform::OS}-#{FFI::Platform::ARCH}"
     end
-    expect(stdcall_jitlib.attach_function(
-             :test_stdcall, %i[int8 int16 int32 int64 float double], :long,
-           )).to be_nil
+    stdcall_jitlib.attach_llvm_jit_function(
+      :test_stdcall, %i[int8 int16 int32 int64 float double], :long,
+    )
     expect(stdcall_jitlib.test_stdcall(1, 2, 3, 4, 1.0, 2.0)).to eq(42)
 
     skip "structures and pointers aren't supported yet"
@@ -317,11 +317,11 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
              :a2, :double,
              :a3, :pointer
     end
-    expect(stdcall_jitlib.attach_function(
-             :test_stdcall_many_params, [
-               :pointer, :int8, :int16, :int32, :int64, struct_ucdp.by_value, struct_ucdp.by_ref, :float, :double,
-             ], :void,
-           )).to be_nil
+    stdcall_jitlib.attach_llvm_jit_function(
+      :test_stdcall_many_params, [
+        :pointer, :int8, :int16, :int32, :int64, struct_ucdp.by_value, struct_ucdp.by_ref, :float, :double,
+      ], :void,
+    )
     s = struct_ucdp.new
     po = FFI::MemoryPointer.new :long
     stdcall_jitlib.test_stdcall_many_params po, 1, 2, 3, 4, s, s, 1.0, 2.0

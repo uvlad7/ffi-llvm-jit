@@ -145,7 +145,9 @@ module FFI
       # @note Return type doesn't match the original method, but it's usually not used
       # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
       def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
-        return if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+        if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+          return jit_only ? nil : Function.new(ret_type, arg_types, function_handle, options)
+        end
         raise NotImplementedError, "Cannot create JIT function #{mname}" if jit_only
 
         super(function_handle, mname, arg_types, ret_type, options)
@@ -159,7 +161,7 @@ module FFI
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
         # but we'd still need to know use libffi to create varargs
-        ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
+        ret_type_name = SUPPORTED_FROM_NATIVE[ret_type]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
         enum_types = []
         unless options[:enums].nil?
@@ -170,8 +172,9 @@ module FFI
         return false if options[:blocking] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
         call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
-        rb_func_addr, uniq_id = llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name,
-                                                       call_conv,)
+        rb_func_addr, uniq_id = llvm_jit_function_addr(
+          mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
+        )
         if enum_types.empty?
           attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_type_names.size, false)
         else
