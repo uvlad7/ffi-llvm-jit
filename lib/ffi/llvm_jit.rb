@@ -170,12 +170,13 @@ module FFI
         return false if options[:blocking] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
         call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
-        rb_func_addr, uniq_id = llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
+        rb_func_addr, uniq_id = llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name,
+                                                       call_conv,)
         if enum_types.empty?
           attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_type_names.size, false)
         else
-          enums = options[:enums]
-          code = <<-code
+          enums = options[:enums] # rubocop:disable Lint/UselessAssignment
+          code = <<-CODE
             @ffi_jit_enums_#{uniq_id} = enums
 
             def self.included(base)
@@ -184,18 +185,18 @@ module FFI
             end
 
             def self.#{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
-              #{enum_types.map { |i| "arg_#{i} = @ffi_jit_enums_#{uniq_id}.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n") }
+              #{enum_types.map { |i| "arg_#{i} = @ffi_jit_enums_#{uniq_id}.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
               #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
             end
 
             def #{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
               ffi_jit_enums = self.class.instance_variable_get(:@_ffi_jit_enums_#{uniq_id})
-              #{enum_types.map { |i| "arg_#{i} = ffi_jit_enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n") }
+              #{enum_types.map { |i| "arg_#{i} = ffi_jit_enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
               #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
             end
-          code
+          CODE
           attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_type_names.size, true)
-          self.module_eval code, __FILE__, __LINE__
+          module_eval code, __FILE__, __LINE__
         end
         true
       end

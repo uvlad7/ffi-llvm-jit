@@ -76,7 +76,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   it 'supports enums' do
     # partial support - not as typedefs, for that dataconverter support is needed
     jitlib.enum [:a, :b, 2]
-    expect(jitlib.attach_function(:spec_enum, [:int, :string], :int)).to be_nil
+    expect(jitlib.attach_function(:spec_enum, %i[int string], :int)).to be_nil
     expect(jitlib.spec_enum(:a, nil)).to eq(0)
     expect(jitlib.spec_enum(:b, nil)).to eq(2)
     expect(jitlib.spec_enum(1, nil)).to eq(1)
@@ -93,7 +93,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
     enums = FFI::Enums.new
     enums << FFI::Enum.new([:v, 42])
-    expect(jitlib.attach_function(:spec_enum_cust, :spec_enum, [:int, :string], :int, enums: enums)).to be_nil
+    expect(jitlib.attach_function(:spec_enum_cust, :spec_enum, %i[int string], :int, enums: enums)).to be_nil
     expect do
       jitlib.spec_enum_cust(:c, nil)
     end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
