@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 require 'ffi'
 require 'llvm/core'
 require 'llvm/linker'
@@ -81,6 +83,13 @@ module FFI
         buffer_in: LLVM.Pointer(LLVM.Void),
         buffer_out: LLVM.Pointer(LLVM.Void),
         buffer_inout: LLVM.Pointer(LLVM.Void),
+        # TODO: long_double
+        # long double is tricky - it can be an alias to double, can be x86fp80 - which can be 12 or 16 bytes,
+        # fp128, ppcfp128
+        # https://en.wikipedia.org/wiki/Long_double
+        # TODO: float128
+        # TODO: int128
+        # TODO: float16/half
       }.freeze
 
       private_constant :INTPTR, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
@@ -116,6 +125,11 @@ module FFI
       SUPPORTED_FROM_NATIVE.freeze
       private_constant :SUPPORTED_TO_NATIVE, :SUPPORTED_FROM_NATIVE
 
+      ENUM_TYPES = Set[
+        :int8, :int16, :int32, :uint8, :uint16, :uint32, :int64, :uint64, :long, :ulong, :float, :double, :long_double,
+      ].freeze
+      private_constant :ENUM_TYPES
+
       # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # Same as +attach_function+, but raises an exception if cannot create JIT function
@@ -147,18 +161,46 @@ module FFI
         # but we'd still need to know use libffi to create varargs
         ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
         arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
+        enum_types = []
+        unless options[:enums].nil?
+          arg_type_names.each_with_index { |arg_type_name, i| enum_types.push(i) if ENUM_TYPES.include?(arg_type_name) }
+        end
         # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
         # Here we do the same and don't need to guard against type_map
-        return false if options[:blocking] || options[:enums] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
+        return false if options[:blocking] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
         call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
-        attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
-        # singleton_class.alias_method rb_name, jit_name
-        # alias_method rb_name, jit_name
+        rb_func_addr, uniq_id = llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
+        if enum_types.empty?
+          attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_type_names.size, false)
+        else
+          enums = options[:enums]
+          code = <<-code
+            @ffi_jit_enums_#{uniq_id} = enums
+
+            def self.included(base)
+              base.instance_variable_set(:@_ffi_jit_enums_#{uniq_id}, @ffi_jit_enums_#{uniq_id})
+              super
+            end
+
+            def self.#{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              #{enum_types.map { |i| "arg_#{i} = @ffi_jit_enums_#{uniq_id}.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n") }
+              #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+            end
+
+            def #{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              ffi_jit_enums = self.class.instance_variable_get(:@_ffi_jit_enums_#{uniq_id})
+              #{enum_types.map { |i| "arg_#{i} = ffi_jit_enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n") }
+              #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+            end
+          code
+          attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_type_names.size, true)
+          self.module_eval code, __FILE__, __LINE__
+        end
         true
       end
 
-      def attach_llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv)
+      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
@@ -229,8 +271,8 @@ module FFI
           # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
           LLVM_ENG.function_address(rb_func.name)
         end
-        attach_rb_wrap_function(rb_name.to_s, rb_func_addr, arg_type_names.size)
-        nil
+        # I'm not sure whether func addr can be the same in ORC JIT, but I'm pretty sure module address in uniq
+        [rb_func_addr, llvm_mod.to_ptr.address]
       end
 
       def link_external_function(mod, name)

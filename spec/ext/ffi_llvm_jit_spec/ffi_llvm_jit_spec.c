@@ -30,6 +30,10 @@ bool spec_bool_ret(signed int val)
     return val == 42;
 }
 
+int spec_enum(int val, char* str) {
+    return val;
+}
+
 signed char spec_char_to_downcase(signed char val) {
     return val + 32;
 }

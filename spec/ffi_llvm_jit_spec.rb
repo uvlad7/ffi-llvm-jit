@@ -73,10 +73,37 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     end.to raise_error(TypeError, "unable to resolve type 'length'")
   end
 
-  it 'detects enums' do
-    expect(jitlib.attach_function(:strlen9, :strlen, [:string], :size_t)).to be_nil
-    jitlib.enum :foo, %i[zero one two]
-    expect(jitlib.attach_function(:strlen10, :strlen, [:string], :size_t)).to be_a(FFI::Function)
+  it 'supports enums' do
+    # partial support - not as typedefs, for that dataconverter support is needed
+    jitlib.enum [:a, :b, 2]
+    expect(jitlib.attach_function(:spec_enum, [:int, :string], :int)).to be_nil
+    expect(jitlib.spec_enum(:a, nil)).to eq(0)
+    expect(jitlib.spec_enum(:b, nil)).to eq(2)
+    expect(jitlib.spec_enum(1, nil)).to eq(1)
+    expect do
+      # Test non-enum type stays, not converted to nil
+      jitlib.spec_enum(1, :c)
+    end.to raise_error(TypeError, 'no implicit conversion of Symbol into String')
+    expect do
+      jitlib.spec_enum(:c, nil)
+    end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
+    jitlib.enum [:c, 42]
+    # test it uses the same object and is affected by further changes
+    expect(jitlib.spec_enum(:c, nil)).to eq(42)
+
+    enums = FFI::Enums.new
+    enums << FFI::Enum.new([:v, 42])
+    expect(jitlib.attach_function(:spec_enum_cust, :spec_enum, [:int, :string], :int, enums: enums)).to be_nil
+    expect do
+      jitlib.spec_enum_cust(:c, nil)
+    end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
+    expect(jitlib.spec_enum_cust(:v, nil)).to eq(42)
+
+    includer = Class.new.tap { |cls| cls.include(jitlib) }.new
+    expect do
+      includer.spec_enum_cust(:c, nil)
+    end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
+    expect(includer.spec_enum_cust(:v, nil)).to eq(42)
   end
 
   it 'supports multiple args' do
