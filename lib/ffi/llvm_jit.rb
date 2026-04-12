@@ -146,7 +146,12 @@ module FFI
       # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
       def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
         if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
-          return jit_only ? nil : Function.new(ret_type, arg_types, function_handle, options)
+          return if jit_only
+
+          invoker = Function.new(ret_type, arg_types, function_handle, options)
+          @ffi_functions ||= {}
+          @ffi_functions[mname.to_s.to_sym] = invoker
+          return invoker
         end
         raise NotImplementedError, "Cannot create JIT function #{mname}" if jit_only
 
