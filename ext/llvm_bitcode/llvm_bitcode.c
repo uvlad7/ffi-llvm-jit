@@ -167,3 +167,15 @@ __attribute__((always_inline)) VALUE ffi_llvm_jit_string_to_value(char * arg) {
 __attribute__((always_inline)) void ffi_llvm_jit_rb_gc_guard(VALUE v) {
     RB_GC_GUARD(v);
 }
+
+VALUE ffi_llvm_jit_save_exception(VALUE data, VALUE exc) {
+    VALUE* store = (VALUE *) data;
+    *store = exc;
+    return Qnil;
+}
+
+__attribute__((always_inline)) void ffi_llvm_jit_raise_exception(VALUE exc) {
+    if (RTEST(exc) && exc != Qnil) {
+        rb_exc_raise(exc);
+    }
+}

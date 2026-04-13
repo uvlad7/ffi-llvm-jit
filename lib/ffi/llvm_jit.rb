@@ -57,6 +57,8 @@ module FFI
       # see @LLVMinst inttoptr
       INTPTR = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = INTPTR
+      VOID_PTR_T = LLVM.Pointer() # Opaque pointer I guess
+      RB_UNBLOCK_T = LLVM_MOD.functions['rb_thread_call_without_gvl'].params[2].type
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
         void: LLVM.Void,
@@ -130,7 +132,7 @@ module FFI
       ].freeze
       private_constant :ENUM_TYPES
 
-      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # rubocop:disable Metrics/MethodLength, Metrics/BlockLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
@@ -190,11 +192,12 @@ module FFI
         end
         # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
         # Here we do the same and don't need to guard against type_map
-        return false if options[:blocking] || ret_type_name.nil? || arg_type_names.any?(&:nil?)
+        return false if ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
         call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
         rb_func_addr, uniq_id = llvm_jit_function_addr(
           mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
+          blocking: options[:blocking],
         )
         if enum_types.empty? && type_mappers.empty?
           attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_type_names.size, false)
@@ -257,14 +260,13 @@ module FFI
         true
       end
 
-      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv)
+      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
-        func_t = LLVM.Function(
-          arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] },
-          LLVM_TYPES[ret_type_name],
-        )
+        arg_types = arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] }
+        ret_type = LLVM_TYPES[ret_type_name]
+        func_t = LLVM.Function(arg_types, ret_type)
         func_ptr_t = LLVM.Pointer(func_t)
         # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
         func_ptr = llvm_mod.globals.add(func_ptr_t, '') do |var|
@@ -274,34 +276,78 @@ module FFI
           var.initializer = INTPTR.from_i(c_address).int_to_ptr(func_ptr_t)
         end
 
+        if blocking
+          params_store_t = LLVM.Struct(VALUE, *arg_types, ret_type) # first field - for error
+          call_blocking_func = llvm_mod.functions.add(
+            '', [VOID_PTR_T], VOID_PTR_T,
+          ) do |llvm_function, params_store|
+            llvm_function.basic_blocks.append('entry').build do |builder|
+              converted_params = arg_types.map.with_index do |t, i|
+                builder.load2(t, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + i)], ''))
+              end
+              ret = insert_cfunc_call(
+                builder, call_conv, converted_params, func_ptr, func_t,
+              )
+              builder.store(
+                ret, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + arg_types.size)], ''),
+              )
+              builder.ret(VOID_PTR_T.null)
+            end
+          end
+          do_blocking_call_func = llvm_mod.functions.add(
+            '', [VALUE], VALUE,
+          ) do |llvm_function, data_param|
+            llvm_function.basic_blocks.append('entry').build do |builder|
+              # call_ins =
+              builder.call(
+                link_external_function(llvm_mod, 'rb_thread_call_without_gvl'),
+                call_blocking_func,
+                builder.int2ptr(data_param, VOID_PTR_T),
+                INTPTR.from_i(-1).int_to_ptr(RB_UNBLOCK_T),
+                VOID_PTR_T.null,
+              )
+              # LLVM::C.set_tail_call(call_ins, 1)
+              builder.ret(builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil')))
+            end
+          end
+        end
+
         # Something is wrong in case of name collizion; and even though you can
         # update rb_func.name=, function_address is still zero
         # Upd: It happens if functions are the same even though their names are different
         rb_func = llvm_mod.functions.add(
           :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (1 + arg_type_names.size), VALUE,
         ) do |llvm_function, _rb_self, *params|
-          llvm_function.basic_blocks.append('entry').build do |b|
+          llvm_function.basic_blocks.append('entry').build do |builder|
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
-              b.call(
+              builder.call(
                 link_external_function(llvm_mod, "ffi_llvm_jit_value_to_#{arg_type}"),
                 param,
               )
             end
-
-            func_ptr_val = b.load(func_ptr)
-            # See value.rb (Function) and builder.rb (Builder#call2)
-            # func_ptr_val is actually an Instruction, can't set call_conv
-            res = b.call2(func_t, func_ptr_val, *converted_params)
-            res.call_conv = call_conv if call_conv
+            res, err = if blocking
+                         insert_blocking_call(
+                           builder, llvm_mod, params_store_t, converted_params, do_blocking_call_func, ret_type,
+                         )
+                       else
+                         insert_cfunc_call(
+                           builder, call_conv, converted_params, func_ptr, func_t,
+                         )
+                       end
             # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
-            b.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
-            b.ret(
+            builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
+            # In FFI it's also used to re-raise from callbacks, but here it's only for blocking calls
+            if blocking
+              builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'),
+                           builder.load2(VALUE, err),)
+            end
+            builder.ret(
               if ret_type_name == :void
-                b.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
+                builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
               else
                 # Note for future: in FFI struct layout redefinition doesn't change ffiParameterTypes of
                 #   already attached functions
-                b.call(
+                builder.call(
                   link_external_function(llvm_mod, "ffi_llvm_jit_#{ret_type_name}_to_value"),
                   res,
                 )
@@ -321,6 +367,8 @@ module FFI
           # mustn't be reused until the module is disposed, unlike
           # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
           LLVM_ENG.modules.add(llvm_mod)
+          call_blocking_func&.verify!
+          do_blocking_call_func&.verify!
           rb_func.verify!
           llvm_mod.verify!
           # rb_func.name isn't always the same as rb_name, in case of name clashes
@@ -330,6 +378,46 @@ module FFI
         end
         # I'm not sure whether func addr can be the same in ORC JIT, but I'm pretty sure module address in uniq
         [rb_func_addr, llvm_mod.to_ptr.address]
+      end
+
+      # rubocop:disable Metrics/ParameterLists
+      def insert_blocking_call(builder, llvm_mod, params_store_t, converted_params, do_blocking_call_func, ret_type)
+        params_store = builder.alloca(params_store_t)
+        err_p = builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(0)], '')
+        builder.store(
+          VALUE.from_i(0),
+          err_p,
+        )
+        converted_params.each_with_index do |p, i|
+          builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + i)], ''))
+        end
+        # TODO: fix builder.ptr2int(params_store, VALUE), use separate stores
+        builder.call(
+          link_external_function(llvm_mod, 'rb_rescue2'),
+          do_blocking_call_func,
+          builder.ptr2int(params_store, VALUE),
+          link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
+          builder.ptr2int(params_store, VALUE),
+          builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
+          VALUE.from_i(0),
+        )
+        [
+          builder.load2(
+            ret_type,
+            builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + converted_params.size)], ''),
+          ),
+          err_p,
+        ]
+      end
+      # rubocop:enable Metrics/ParameterLists
+
+      def insert_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
+        func_ptr_val = builder.load(func_ptr)
+        # See value.rb (Function) and builder.rb (Builder#call2)
+        # func_ptr_val is actually an Instruction, can't set call_conv
+        res = builder.call2(func_t, func_ptr_val, *converted_params)
+        res.call_conv = call_conv if call_conv
+        res
       end
 
       def link_external_function(mod, name)
@@ -351,13 +439,15 @@ module FFI
 
       def link_external_global(mod, name)
         unless mod.globals[name]
-          glob = mod.globals.add(LLVM_MOD.globals[name].type, name)
+          # TODO: check proper types
+          glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name]), nil), name)
+          # glob = mod.globals.add(LLVM_MOD.globals[name].type, name)
           glob.linkage = :external
         end
         mod.globals[name]
       end
 
-      # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # rubocop:enable Metrics/MethodLength, Metrics/BlockLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     end
   end
 end
