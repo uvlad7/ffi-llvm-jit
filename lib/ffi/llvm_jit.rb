@@ -174,7 +174,7 @@ module FFI
 
         while ret_type.is_a?(Type::Mapped)
           type_mappers[arg_types.size] ||= []
-          type_mappers[arg_types.size].push(ret_type)
+          type_mappers[arg_types.size].unshift(ret_type)
           ret_type = ret_type.native_type
         end
 
@@ -214,10 +214,10 @@ module FFI
             def self.#{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
               enums, type_mappers = @_ffi_jit_enums_and_mappers_#{uniq_id}
               #{
-                arg_types.size.times.flat_map do |i|
+                arg_types.size.times.map do |i|
                   next unless type_mappers[i]
 
-                  type_mappers[i].size.times.map { |j| "arg_#{i} = type_mappers[#{i}][#{j}].to_native(arg_#{i}, nil)" }
+                  "type_mappers[#{i}].each { |mapper| arg_#{i} = mapper.to_native(arg_#{i}, nil) }"
                 end.join("\n")
               }
               #{enum_types.map { |i| "arg_#{i} = enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
@@ -225,7 +225,7 @@ module FFI
               #{
                 if type_mappers[arg_types.size]
                   i = arg_types.size
-                  type_mappers[i].size.times.map { |j| "res = type_mappers[#{i}][#{j}].from_native(res, nil)" }.join("\n")
+                  "type_mappers[#{i}].each { |mapper| res = mapper.from_native(res, nil) }"
                 end
               }
               res
@@ -234,10 +234,10 @@ module FFI
             def #{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
               enums, type_mappers = self.class.instance_variable_get(:@_ffi_jit_enums_and_mappers_#{uniq_id})
               #{
-                arg_types.size.times.flat_map do |i|
+                arg_types.size.times.map do |i|
                   next unless type_mappers[i]
 
-                  type_mappers[i].size.times.map { |j| "arg_#{i} = type_mappers[#{i}][#{j}].to_native(arg_#{i}, nil)" }
+                  "type_mappers[#{i}].each { |mapper| arg_#{i} = mapper.to_native(arg_#{i}, nil) }"
                 end.join("\n")
               }
               #{enum_types.map { |i| "arg_#{i} = enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
@@ -245,7 +245,7 @@ module FFI
               #{
                 if type_mappers[arg_types.size]
                   i = arg_types.size
-                  type_mappers[i].size.times.map { |j| "res = type_mappers[#{i}][#{j}].from_native(res, nil)" }.join("\n")
+                  "type_mappers[#{i}].each { |mapper| res = mapper.from_native(res, nil) }"
                 end
               }
               res

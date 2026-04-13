@@ -315,6 +315,37 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     )
   end
 
+  it 'supports stacked mapped values' do
+    mapper1 = Class.new do
+      extend FFI::DataConverter
+      native_type FFI::Type::INT
+
+      def self.to_native(value, _context)
+        value**2
+      end
+
+      def self.from_native(value, _context)
+        value * 2
+      end
+    end
+
+    mapper2 = Class.new do
+      extend FFI::DataConverter
+      native_type mapper1
+
+      def self.to_native(value, _context)
+        value.to_i
+      end
+
+      def self.from_native(value, _context)
+        :"#{value}"
+      end
+    end
+
+    jitlib.attach_llvm_jit_function :spec_converter, [mapper2], mapper2
+    expect(jitlib.spec_converter('10')).to eq(:'-200')
+  end
+
   it 'supports stdcall' do
     if FFI::Platform::OS =~ /windows|cygwin/ && FFI::Platform::ARCH == 'i386'
       expect(described_class::Library.const_get(:LLVM_STDCALL)).to be_a(Symbol)

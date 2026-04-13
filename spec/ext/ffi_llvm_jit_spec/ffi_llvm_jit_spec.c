@@ -34,6 +34,11 @@ int spec_enum(int val, char* str) {
     return val;
 }
 
+signed int spec_converter(signed int val)
+{
+    return -val;
+}
+
 signed char spec_char_to_downcase(signed char val) {
     return val + 32;
 }
