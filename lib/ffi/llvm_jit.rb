@@ -285,7 +285,7 @@ module FFI
               converted_params = arg_types.map.with_index do |t, i|
                 builder.load2(t, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
               end
-              ret = insert_cfunc_call(
+              ret = emit_cfunc_call(
                 builder, call_conv, converted_params, func_ptr, func_t,
               )
               builder.store(
@@ -327,11 +327,11 @@ module FFI
             end
             res = if blocking
                     exc_store = builder.alloca(VALUE)
-                    insert_blocking_call(
+                    emit_blocking_call(
                       builder, llvm_mod, params_store_t, exc_store, converted_params, do_blocking_call_func, ret_type,
                     )
                   else
-                    insert_cfunc_call(
+                    emit_cfunc_call(
                       builder, call_conv, converted_params, func_ptr, func_t,
                     )
                   end
@@ -383,7 +383,7 @@ module FFI
       end
 
       # rubocop:disable Metrics/ParameterLists
-      def insert_blocking_call(
+      def emit_blocking_call(
         builder, llvm_mod, params_store_t, exc_store, converted_params, do_blocking_call_func, ret_type
       )
         params_store = builder.alloca(params_store_t)
@@ -410,7 +410,7 @@ module FFI
       end
       # rubocop:enable Metrics/ParameterLists
 
-      def insert_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
+      def emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
         func_ptr_val = builder.load(func_ptr)
         # See value.rb (Function) and builder.rb (Builder#call2)
         # func_ptr_val is actually an Instruction, can't set call_conv
@@ -438,9 +438,7 @@ module FFI
 
       def link_external_global(mod, name)
         unless mod.globals[name]
-          # TODO: check proper types
           glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name]), nil), name)
-          # glob = mod.globals.add(LLVM_MOD.globals[name].type, name)
           glob.linkage = :external
         end
         mod.globals[name]

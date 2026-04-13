@@ -175,7 +175,7 @@ VALUE ffi_llvm_jit_save_exception(VALUE data, VALUE exc) {
 }
 
 __attribute__((always_inline)) void ffi_llvm_jit_raise_exception(VALUE exc) {
-    if (RTEST(exc) && exc != Qnil) {
+    if (exc) {
         rb_exc_raise(exc);
     }
 }
