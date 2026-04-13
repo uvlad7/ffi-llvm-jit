@@ -59,6 +59,8 @@ module FFI
       VALUE = INTPTR
       VOID_PTR_T = LLVM.Pointer() # Opaque pointer I guess
       BLOCKING_CALL_T = LLVM_MOD.types['struct.ffi_llvm_jit_blocking_call_t']
+      raise 'BLOCKING_CALL_T not found' unless BLOCKING_CALL_T
+
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
         void: LLVM.Void,
@@ -275,9 +277,11 @@ module FFI
           var.unnamed_addr = true
           var.initializer = INTPTR.from_i(c_address).int_to_ptr(func_ptr_t)
         end
+        void_ret = ret_type_name == :void
 
         if blocking
-          params_store_t = LLVM.Struct(*arg_types, ret_type)
+          params_store_fields = [*arg_types, *(ret_type unless void_ret)]
+          params_store_t = LLVM.Struct(*params_store_fields) unless params_store_fields.empty?
           call_blocking_func = llvm_mod.functions.add(
             '', [VOID_PTR_T], VOID_PTR_T,
           ) do |llvm_function, params_store|
@@ -288,9 +292,11 @@ module FFI
               ret = emit_cfunc_call(
                 builder, call_conv, converted_params, func_ptr, func_t,
               )
-              builder.store(
-                ret, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(arg_types.size)], ''),
-              )
+              unless void_ret
+                builder.store(
+                  ret, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(arg_types.size)], ''),
+                )
+              end
               builder.ret(VOID_PTR_T.null)
             end
           end
@@ -306,7 +312,7 @@ module FFI
             # less readable, but easier that to position builder
             # TODO: figure out builder.position stuff
             if blocking
-              params_store = builder.alloca(params_store_t)
+              params_store = builder.alloca(params_store_t) if params_store_t
               call_data = builder.alloca(BLOCKING_CALL_T)
               exc_store = builder.alloca(VALUE)
             end
@@ -318,8 +324,8 @@ module FFI
             end
             res = if blocking
                     emit_blocking_call(
-                      builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type,
-                      params_store, call_data
+                      builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func,
+                      void_ret ? nil : ret_type, params_store, call_data,
                     )
                   else
                     emit_cfunc_call(
@@ -335,7 +341,7 @@ module FFI
               )
             end
             builder.ret(
-              if ret_type_name == :void
+              if void_ret
                 builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
               else
                 # Note for future: in FFI struct layout redefinition doesn't change ffiParameterTypes of
@@ -386,7 +392,10 @@ module FFI
           builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
         end
         builder.store(call_blocking_func, builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(0)], ''))
-        builder.store(params_store, builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''))
+        builder.store(
+          params_store || VOID_PTR_T.null,
+          builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''),
+        )
         builder.call(
           link_external_function(llvm_mod, 'rb_rescue2'),
           link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
@@ -396,6 +405,8 @@ module FFI
           builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
           VALUE.from_i(0),
         )
+        return unless ret_type
+
         builder.load2(
           ret_type,
           builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(converted_params.size)], ''),

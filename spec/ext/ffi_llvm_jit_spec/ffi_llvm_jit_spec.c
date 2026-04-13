@@ -15,7 +15,6 @@ spec_point_t* spec_make_point(int32_t x, int32_t y) {
     return p;
 }
 
-
 int32_t spec_point_sum(spec_point_t *p) {
     return p->x + p->y;
 }
@@ -45,6 +44,16 @@ signed char spec_char_to_downcase(signed char val) {
 
 unsigned char spec_uchar_to_downcase(unsigned char val) {
     return val + 32;
+}
+
+void spec_blocking_void_ret(unsigned int seconds) {
+}
+
+unsigned int spec_blocking_void_param(void) {
+    return 42;
+}
+
+void spec_blocking_void_ret_void_param(void) {
 }
 
 #if defined(_WIN32) && !defined(_WIN64)

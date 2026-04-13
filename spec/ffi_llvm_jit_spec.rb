@@ -366,6 +366,16 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect { thread.value }.to raise_error(RuntimeError, 'Ooops')
   end
 
+  it 'supports blocking calls with void ret and params' do
+    jitlib.attach_llvm_jit_function :spec_blocking_void_ret, [:uint], :void, blocking: true
+    jitlib.attach_llvm_jit_function :spec_blocking_void_param, [], :uint, blocking: true
+    jitlib.attach_llvm_jit_function :spec_blocking_void_ret_void_param, [], :void, blocking: true
+
+    expect(jitlib.spec_blocking_void_ret(1)).to be_nil
+    expect(jitlib.spec_blocking_void_param).to eq(42)
+    expect(jitlib.spec_blocking_void_ret_void_param).to be_nil
+  end
+
   it 'supports stdcall' do
     if FFI::Platform::OS =~ /windows|cygwin/ && FFI::Platform::ARCH == 'i386'
       expect(described_class::Library.const_get(:LLVM_STDCALL)).to be_a(Symbol)
