@@ -13,6 +13,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   let(:point_struct) do
     Class.new(FFI::Struct) do
       layout :x, :int32, :y, :int32
+
+      def self.release(*); end
     end
   end
 
@@ -280,7 +282,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'supports struct return value' do
-    # TODO: auto_prt (mapped), by_ref (mapped), by_value (StructByValue)
+    # TODO: by_value (StructByValue)
     jitlib.attach_llvm_jit_function :spec_make_point, %i[int32 int32], point_struct
     ptr = jitlib.spec_make_point(4, 2)
     expect(ptr).to be_a(FFI::Pointer)
@@ -296,6 +298,21 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     point[:x] = 10
     point[:y] = 32
     expect(jitlib.spec_point_sum(point)).to eq(42)
+    expect(jitlib.spec_point_sum(point.to_ptr)).to eq(42)
+  end
+
+  it 'supports mapped values' do
+    jitlib.attach_llvm_jit_function :spec_make_point, %i[int32 int32], point_struct.auto_ptr
+    jitlib.attach_llvm_jit_function :spec_point_sum, [point_struct.by_ref], :int32
+
+    point = jitlib.spec_make_point(10, 32)
+    expect(point).to be_a(point_struct)
+    expect(point[:x]).to eq(10)
+    expect(point[:y]).to eq(32)
+    expect(jitlib.spec_point_sum(point)).to eq(42)
+    expect { jitlib.spec_point_sum(point.to_ptr) }.to raise_error(
+      TypeError, "wrong argument type FFI::AutoPointer (expected #{point_struct.inspect})",
+    )
   end
 
   it 'supports stdcall' do

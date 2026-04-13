@@ -162,6 +162,22 @@ module FFI
         unknown_options = options.keys - %i[convention type_map blocking enums]
         return false unless unknown_options.empty?
 
+        type_mappers = []
+        arg_types = arg_types.map.with_index do |arg_type, i|
+          while arg_type.is_a?(Type::Mapped)
+            type_mappers[i] ||= []
+            type_mappers[i].push(arg_type)
+            arg_type = arg_type.native_type
+          end
+          arg_type
+        end
+
+        while ret_type.is_a?(Type::Mapped)
+          type_mappers[arg_types.size] ||= []
+          type_mappers[arg_types.size].push(ret_type)
+          ret_type = ret_type.native_type
+        end
+
         # TODO: support call conventions other than stdcall (rb_func.call_conv=)
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
@@ -180,27 +196,59 @@ module FFI
         rb_func_addr, uniq_id = llvm_jit_function_addr(
           mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
         )
-        if enum_types.empty?
+        if enum_types.empty? && type_mappers.empty?
           attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_type_names.size, false)
         else
-          enums = options[:enums] # rubocop:disable Lint/UselessAssignment
+          # mapped.to_native is the same as mapped.converter.to_native
+          # mapped.from_native is the same as mapped.converter.from_native
+          # mapped.native_type is the same as mapped.converter.native_type
+          enums_and_mappers = [options[:enums], type_mappers] # rubocop:disable Lint/UselessAssignment
           code = <<-CODE
-            @ffi_jit_enums_#{uniq_id} = enums
+            @_ffi_jit_enums_and_mappers_#{uniq_id} = enums_and_mappers
 
             def self.included(base)
-              base.instance_variable_set(:@_ffi_jit_enums_#{uniq_id}, @ffi_jit_enums_#{uniq_id})
+              base.instance_variable_set(:@_ffi_jit_enums_and_mappers_#{uniq_id}, @_ffi_jit_enums_and_mappers_#{uniq_id})
               super
             end
 
             def self.#{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
-              #{enum_types.map { |i| "arg_#{i} = @ffi_jit_enums_#{uniq_id}.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
-              #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              enums, type_mappers = @_ffi_jit_enums_and_mappers_#{uniq_id}
+              #{
+                arg_types.size.times.flat_map do |i|
+                  next unless type_mappers[i]
+
+                  type_mappers[i].size.times.map { |j| "arg_#{i} = type_mappers[#{i}][#{j}].to_native(arg_#{i}, nil)" }
+                end.join("\n")
+              }
+              #{enum_types.map { |i| "arg_#{i} = enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
+              res = #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              #{
+                if type_mappers[arg_types.size]
+                  i = arg_types.size
+                  type_mappers[i].size.times.map { |j| "res = type_mappers[#{i}][#{j}].from_native(res, nil)" }.join("\n")
+                end
+              }
+              res
             end
 
             def #{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
-              ffi_jit_enums = self.class.instance_variable_get(:@_ffi_jit_enums_#{uniq_id})
-              #{enum_types.map { |i| "arg_#{i} = ffi_jit_enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
-              #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              enums, type_mappers = self.class.instance_variable_get(:@_ffi_jit_enums_and_mappers_#{uniq_id})
+              #{
+                arg_types.size.times.flat_map do |i|
+                  next unless type_mappers[i]
+
+                  type_mappers[i].size.times.map { |j| "arg_#{i} = type_mappers[#{i}][#{j}].to_native(arg_#{i}, nil)" }
+                end.join("\n")
+              }
+              #{enum_types.map { |i| "arg_#{i} = enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
+              res = #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              #{
+                if type_mappers[arg_types.size]
+                  i = arg_types.size
+                  type_mappers[i].size.times.map { |j| "res = type_mappers[#{i}][#{j}].from_native(res, nil)" }.join("\n")
+                end
+              }
+              res
             end
           CODE
           attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_type_names.size, true)
