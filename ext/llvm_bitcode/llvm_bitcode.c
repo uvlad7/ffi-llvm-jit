@@ -175,6 +175,7 @@ VALUE ffi_llvm_jit_save_exception(VALUE data, VALUE exc) {
 }
 
 __attribute__((always_inline)) void ffi_llvm_jit_raise_exception(VALUE exc) {
+    // For now, RTEST isn't needed here
     if (exc) {
         rb_exc_raise(exc);
     }

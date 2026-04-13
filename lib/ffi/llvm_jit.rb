@@ -303,6 +303,13 @@ module FFI
           :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (1 + arg_type_names.size), VALUE,
         ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |builder|
+            # less readable, but easier that to position builder
+            # TODO: figure out builder.position stuff
+            if blocking
+              params_store = builder.alloca(params_store_t)
+              call_data = builder.alloca(BLOCKING_CALL_T)
+              exc_store = builder.alloca(VALUE)
+            end
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
               builder.call(
                 link_external_function(llvm_mod, "ffi_llvm_jit_value_to_#{arg_type}"),
@@ -310,9 +317,9 @@ module FFI
               )
             end
             res = if blocking
-                    exc_store = builder.alloca(VALUE)
                     emit_blocking_call(
                       builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type,
+                      params_store, call_data
                     )
                   else
                     emit_cfunc_call(
@@ -367,11 +374,11 @@ module FFI
 
       # rubocop:disable Metrics/ParameterLists
       def emit_blocking_call(
-        builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type
+        builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type,
+        params_store, call_data
       )
-        params_store = builder.alloca(params_store_t)
-        call_data = builder.alloca(BLOCKING_CALL_T)
         builder.store(
+          # Maybe use Qnil here? But const is probably faster
           VALUE.from_i(0),
           exc_store,
         )
