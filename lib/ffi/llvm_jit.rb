@@ -94,7 +94,7 @@ module FFI
         # TODO: float16/half
       }.freeze
 
-      private_constant :INTPTR, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
+      private_constant :INTPTR, :VALUE, :VOID_PTR_T, :RB_UNBLOCK_T, :LLVM_TYPES, :LLVM_STDCALL
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -277,19 +277,19 @@ module FFI
         end
 
         if blocking
-          params_store_t = LLVM.Struct(VALUE, *arg_types, ret_type) # first field - for error
+          params_store_t = LLVM.Struct(*arg_types, ret_type)
           call_blocking_func = llvm_mod.functions.add(
             '', [VOID_PTR_T], VOID_PTR_T,
           ) do |llvm_function, params_store|
             llvm_function.basic_blocks.append('entry').build do |builder|
               converted_params = arg_types.map.with_index do |t, i|
-                builder.load2(t, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + i)], ''))
+                builder.load2(t, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
               end
               ret = insert_cfunc_call(
                 builder, call_conv, converted_params, func_ptr, func_t,
               )
               builder.store(
-                ret, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + arg_types.size)], ''),
+                ret, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(arg_types.size)], ''),
               )
               builder.ret(VOID_PTR_T.null)
             end
@@ -325,21 +325,23 @@ module FFI
                 param,
               )
             end
-            res, err = if blocking
-                         insert_blocking_call(
-                           builder, llvm_mod, params_store_t, converted_params, do_blocking_call_func, ret_type,
-                         )
-                       else
-                         insert_cfunc_call(
-                           builder, call_conv, converted_params, func_ptr, func_t,
-                         )
-                       end
+            res = if blocking
+                    exc_store = builder.alloca(VALUE)
+                    insert_blocking_call(
+                      builder, llvm_mod, params_store_t, exc_store, converted_params, do_blocking_call_func, ret_type,
+                    )
+                  else
+                    insert_cfunc_call(
+                      builder, call_conv, converted_params, func_ptr, func_t,
+                    )
+                  end
             # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
             builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
             # In FFI it's also used to re-raise from callbacks, but here it's only for blocking calls
             if blocking
-              builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'),
-                           builder.load2(VALUE, err),)
+              builder.call(
+                link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store),
+              )
             end
             builder.ret(
               if ret_type_name == :void
@@ -381,33 +383,30 @@ module FFI
       end
 
       # rubocop:disable Metrics/ParameterLists
-      def insert_blocking_call(builder, llvm_mod, params_store_t, converted_params, do_blocking_call_func, ret_type)
+      def insert_blocking_call(
+        builder, llvm_mod, params_store_t, exc_store, converted_params, do_blocking_call_func, ret_type
+      )
         params_store = builder.alloca(params_store_t)
-        err_p = builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(0)], '')
         builder.store(
           VALUE.from_i(0),
-          err_p,
+          exc_store,
         )
         converted_params.each_with_index do |p, i|
-          builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + i)], ''))
+          builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
         end
-        # TODO: fix builder.ptr2int(params_store, VALUE), use separate stores
         builder.call(
           link_external_function(llvm_mod, 'rb_rescue2'),
           do_blocking_call_func,
           builder.ptr2int(params_store, VALUE),
           link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
-          builder.ptr2int(params_store, VALUE),
+          builder.ptr2int(exc_store, VALUE),
           builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
           VALUE.from_i(0),
         )
-        [
-          builder.load2(
-            ret_type,
-            builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(1 + converted_params.size)], ''),
-          ),
-          err_p,
-        ]
+        builder.load2(
+          ret_type,
+          builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(converted_params.size)], ''),
+        )
       end
       # rubocop:enable Metrics/ParameterLists
 
