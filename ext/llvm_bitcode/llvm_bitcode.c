@@ -179,3 +179,18 @@ __attribute__((always_inline)) void ffi_llvm_jit_raise_exception(VALUE exc) {
         rb_exc_raise(exc);
     }
 }
+
+typedef struct
+{
+    void* (*call_blocking_function_fn)(void *);
+    void *params_store;
+} ffi_llvm_jit_blocking_call_t;
+
+VALUE
+ffi_llvm_jit_blocking_call(VALUE data)
+{
+    ffi_llvm_jit_blocking_call_t* call_data = (ffi_llvm_jit_blocking_call_t *) data;
+    rb_thread_call_without_gvl(call_data->call_blocking_function_fn, call_data->params_store, (rb_unblock_function_t *)-1, NULL);
+
+    return Qnil;
+}

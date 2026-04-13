@@ -58,7 +58,7 @@ module FFI
       INTPTR = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = INTPTR
       VOID_PTR_T = LLVM.Pointer() # Opaque pointer I guess
-      RB_UNBLOCK_T = LLVM_MOD.functions['rb_thread_call_without_gvl'].params[2].type
+      BLOCKING_CALL_T = LLVM_MOD.types['struct.ffi_llvm_jit_blocking_call_t']
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
         void: LLVM.Void,
@@ -94,7 +94,7 @@ module FFI
         # TODO: float16/half
       }.freeze
 
-      private_constant :INTPTR, :VALUE, :VOID_PTR_T, :RB_UNBLOCK_T, :LLVM_TYPES, :LLVM_STDCALL
+      private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -294,22 +294,6 @@ module FFI
               builder.ret(VOID_PTR_T.null)
             end
           end
-          do_blocking_call_func = llvm_mod.functions.add(
-            '', [VALUE], VALUE,
-          ) do |llvm_function, data_param|
-            llvm_function.basic_blocks.append('entry').build do |builder|
-              # call_ins =
-              builder.call(
-                link_external_function(llvm_mod, 'rb_thread_call_without_gvl'),
-                call_blocking_func,
-                builder.int2ptr(data_param, VOID_PTR_T),
-                INTPTR.from_i(-1).int_to_ptr(RB_UNBLOCK_T),
-                VOID_PTR_T.null,
-              )
-              # LLVM::C.set_tail_call(call_ins, 1)
-              builder.ret(builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil')))
-            end
-          end
         end
 
         # Something is wrong in case of name collizion; and even though you can
@@ -328,7 +312,7 @@ module FFI
             res = if blocking
                     exc_store = builder.alloca(VALUE)
                     emit_blocking_call(
-                      builder, llvm_mod, params_store_t, exc_store, converted_params, do_blocking_call_func, ret_type,
+                      builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type,
                     )
                   else
                     emit_cfunc_call(
@@ -370,7 +354,6 @@ module FFI
           # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
           LLVM_ENG.modules.add(llvm_mod)
           call_blocking_func&.verify!
-          do_blocking_call_func&.verify!
           rb_func.verify!
           llvm_mod.verify!
           # rb_func.name isn't always the same as rb_name, in case of name clashes
@@ -384,9 +367,10 @@ module FFI
 
       # rubocop:disable Metrics/ParameterLists
       def emit_blocking_call(
-        builder, llvm_mod, params_store_t, exc_store, converted_params, do_blocking_call_func, ret_type
+        builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type
       )
         params_store = builder.alloca(params_store_t)
+        call_data = builder.alloca(BLOCKING_CALL_T)
         builder.store(
           VALUE.from_i(0),
           exc_store,
@@ -394,10 +378,12 @@ module FFI
         converted_params.each_with_index do |p, i|
           builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
         end
+        builder.store(call_blocking_func, builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(0)], ''))
+        builder.store(params_store, builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''))
         builder.call(
           link_external_function(llvm_mod, 'rb_rescue2'),
-          do_blocking_call_func,
-          builder.ptr2int(params_store, VALUE),
+          link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
+          builder.ptr2int(call_data, VALUE),
           link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
           builder.ptr2int(exc_store, VALUE),
           builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
