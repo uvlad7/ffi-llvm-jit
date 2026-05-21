@@ -134,6 +134,9 @@ module FFI
       ].freeze
       private_constant :ENUM_TYPES
 
+      INIT_PID = Process.pid
+      private_constant :INIT_PID
+
       # rubocop:disable Metrics/MethodLength, Metrics/BlockLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # Same as +attach_function+, but raises an exception if cannot create JIT function
@@ -163,6 +166,8 @@ module FFI
       end
 
       def attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+	return unless INIT_PID == Process.pid
+
         unknown_options = options.keys - %i[convention type_map blocking enums]
         return false unless unknown_options.empty?
 
@@ -302,7 +307,7 @@ module FFI
           end
         end
 
-        # Something is wrong in case of name collizion; and even though you can
+        # Something is wrong in case of name collision; and even though you can
         # update rb_func.name=, function_address is still zero
         # Upd: It happens if functions are the same even though their names are different
         rb_func = llvm_mod.functions.add(
@@ -360,7 +365,7 @@ module FFI
           # LLVM_MOD.link_into(llvm_mod)
           # rb_func.dump
 
-          # Ruby llvm_mod object isn't kept arount and might be GCed, but
+          # Ruby llvm_mod object isn't kept around and might be GCed, but
           # it doesn't call +dispose+ automatically, so it's ok.
           # Note that in function name +llvm_mod.hash+ is used and it
           # mustn't be reused until the module is disposed, unlike
@@ -374,7 +379,7 @@ module FFI
           # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
           LLVM_ENG.function_address(rb_func.name)
         end
-        # I'm not sure whether func addr can be the same in ORC JIT, but I'm pretty sure module address in uniq
+        # I'm not sure whether func addr can be the same in ORC JIT, but I'm pretty sure module address is unique
         [rb_func_addr, llvm_mod.to_ptr.address]
       end
 
