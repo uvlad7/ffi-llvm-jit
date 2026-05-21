@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 require 'ffi'
 require 'llvm/core'
 require 'llvm/linker'
@@ -16,6 +18,9 @@ module FFI
 
   # Ruby FFI JIT using LLVM
   module LLVMJIT
+
+    class UnsupportedError < RuntimeError; end
+
     # Extension to FFI::Library to support JIT compilation using LLVM
     module Library # rubocop:disable Metrics/ModuleLength
       include ::FFI::Library
@@ -25,10 +30,28 @@ module FFI
       )
       LLVM_MOD.verify!
 
+      # Register FFI converter addresses with LLVM's global symbol table
+      # before JIT engine creation so they are resolved on first compilation.
+      LLVM::C.add_symbol(
+        'ffi_llvm_jit_save_errno',
+        FFI::DynamicLibrary.send(
+          :load_library, FFI::CURRENT_PROCESS, nil,
+        ).find_function('rbffi_save_errno'),
+      )
+
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
+      LLVM_MUTEX = Mutex.new
 
-      private_constant :LLVM_MOD, :LLVM_ENG
+      # Validate all external declarations in the bitcode module are resolved.
+      # LLVM intrinsics (llvm.*) are handled natively by the JIT and not in the symbol table.
+      unresolved = LLVM_MOD.functions.select do |f|
+        f.declaration?.nonzero? && !f.name.start_with?('llvm.') &&
+          LLVM::C.search_for_address_of_symbol(f.name).null?
+      end
+      raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
+
+      private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX
 
       # LLVM_ENG.dispose is never called
       # https://llvm.org/doxygen/group__LLVMCTarget.html#gaaa9ce583969eb8754512e70ec4b80061
@@ -38,8 +61,12 @@ module FFI
       # bits = FFI.type_size(:int) * 8
       # ::LLVM::Int = const_get("Int#{bits}")
       # see @LLVMinst inttoptr
-      POINTER = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
-      VALUE = POINTER
+      INTPTR = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
+      VALUE = INTPTR
+      VOID_PTR_T = LLVM.Pointer() # Opaque pointer I guess
+      BLOCKING_CALL_T = LLVM_MOD.types['struct.ffi_llvm_jit_blocking_call_t']
+      raise 'BLOCKING_CALL_T not found' unless BLOCKING_CALL_T
+
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
         void: LLVM.Void,
@@ -61,10 +88,10 @@ module FFI
         float: LLVM::Float,
         double: LLVM::Double,
         bool: LLVM::Int1,
-        string: LLVM.Pointer(LLVM::Int8),
+        string: LLVM.Pointer(LLVM.const_get("Int#{FFI.type_size(:char) * 8}")),
       }.freeze
 
-      private_constant :POINTER, :VALUE, :LLVM_TYPES, :LLVM_STDCALL
+      private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -97,33 +124,40 @@ module FFI
       SUPPORTED_FROM_NATIVE.freeze
       private_constant :SUPPORTED_TO_NATIVE, :SUPPORTED_FROM_NATIVE
 
-      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      ENUM_TYPES = Set[
+        :int8, :int16, :int32, :uint8, :uint16, :uint32, :int64, :uint64, :long, :ulong, :float, :double, :long_double,
+      ].freeze
+      private_constant :ENUM_TYPES
 
-      # @note Return type doesn't match the original method, but it's usually not used
+      INIT_PID = Process.pid
+      private_constant :INIT_PID
+
+      # rubocop:disable Metrics/MethodLength, Metrics/BlockLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
       # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
       def attach_function(name, func, args, returns = nil, options = nil)
-        mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
-        return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
-
-        super(mname, cname, arg_types, ret_type, options)
+        mname, cname, arg_types, ret_type, options = convert_attach_function_params(name, func, args, returns, options)
+        function_handle = find_function_handle(cname, arg_types)
+        attach_function_handle(function_handle, mname, arg_types, ret_type, options)
       end
 
       # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
-        # TODO: support LLVM call_conv; not that function_names must be patched for that
+        # TODO: support LLVM call_conv; note that function_names must be patched for that
         # (they also forgot an underscore on Windows for cdecl)
         # https://en.wikipedia.org/wiki/Name_mangling#C
         # (see core_ffi.rb and https://llvm.org/doxygen/namespacellvm_1_1CallingConv.html)
-        mname, cname, arg_types, ret_type, options = convert_params(name, func, args, returns, options)
-        return if attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
-
-        raise NotImplementedError, "Cannot create JIT function #{name}"
+        mname, cname, arg_types, ret_type, options = convert_attach_function_params(name, func, args, returns, options)
+        function_handle = find_function_handle(cname, arg_types)
+        attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: true)
       end
 
       private
 
-      def convert_params(name, func, args, returns, options)
+      # Part copied from refactored FFI for compatibility
+
+      def convert_attach_function_params(name, func, args, returns, options)
         mname = name
         a2 = func
         a3 = args
@@ -136,6 +170,7 @@ module FFI
                                            end
         # Convert :foo to the native type
         arg_types = arg_types.map { |e| find_type(e) }
+        ret_type = find_type(ret_type)
         options = {
           convention: ffi_convention,
           type_map: defined?(@ffi_typedefs) ? @ffi_typedefs : nil,
@@ -149,80 +184,235 @@ module FFI
         [mname, cname, arg_types, ret_type, options]
       end
 
-      def attached_llvm_jit_function?(mname, cname, arg_types, ret_type, options)
-        # TODO: support stdcall convention (rb_func.call_conv=)
-        # TODO: support call_without_gvl
-        # Variadic functions are not supported; we could support known arguments,
-        # but we'd still need to know use libffi to create varargs
-        ret_type_name = SUPPORTED_FROM_NATIVE[find_type(ret_type)]
-        arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
-        if !options[:type_map].nil? || options[:blocking] || options[:enums] ||
-           ret_type_name.nil? || arg_type_names.any?(&:nil?)
-          return false
-        end
-
-        function_handle = ffi_libraries.find do |lib|
-          fn = nil
+      def find_function_handle(cname, arg_types)
+        ffi_libraries.each do |lib|
           begin
-            function_names(cname, arg_types).find do |fname|
+            function_names(cname, arg_types).each do |fname|
               fn = lib.find_function(fname)
+              return fn if fn
             end
           rescue LoadError
             # Ignored
           end
-          break fn if fn
         end
-        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name)) unless function_handle
 
-        call_conv = options[:convention] == :stdcall ? LLVM_STDCALL : nil
-        attach_llvm_jit_function_addr(mname, function_handle.address, arg_type_names, ret_type_name, call_conv)
-        # singleton_class.alias_method rb_name, jit_name
-        # alias_method rb_name, jit_name
+        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name))
+      end
+
+      ###### End ######
+
+      def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
+        if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+          return if jit_only
+
+          invoker = Function.new(ret_type, arg_types, function_handle, options)
+          @ffi_functions ||= {}
+          @ffi_functions[mname.to_s.to_sym] = invoker
+          return invoker
+        end
+        raise NotImplementedError, "Cannot create JIT function #{mname}" if jit_only
+        # Part copied from refactored FFI for compatibility
+        invoker = if arg_types[-1] == FFI::NativeType::VARARGS
+                    VariadicInvoker.new(function_handle, arg_types, ret_type, options)
+                  else
+                    Function.new(ret_type, arg_types, function_handle, options)
+                  end
+        invoker.attach(self, mname.to_s)
+        invoker
+      end
+
+      def attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
+        # TODO: make it more transparent
+        return unless INIT_PID == Process.pid
+
+        unknown_options = options.keys - %i[convention type_map blocking enums]
+        return false unless unknown_options.empty?
+
+        type_mappers = []
+        arg_types = arg_types.map.with_index do |arg_type, i|
+          while arg_type.is_a?(Type::Mapped)
+            type_mappers[i] ||= []
+            type_mappers[i].push(arg_type)
+            arg_type = arg_type.native_type
+          end
+          arg_type
+        end
+
+        while ret_type.is_a?(Type::Mapped)
+          type_mappers[arg_types.size] ||= []
+          type_mappers[arg_types.size].unshift(ret_type)
+          ret_type = ret_type.native_type
+        end
+
+        # TODO: support call conventions other than stdcall (rb_func.call_conv=)
+        # TODO: support call_without_gvl
+        # Variadic functions are not supported; we could support known arguments,
+        # but we'd still need to know use libffi to create varargs
+        ret_type_name = SUPPORTED_FROM_NATIVE[ret_type]
+        arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
+        enum_types = []
+        unless options[:enums].nil?
+          arg_type_names.each_with_index { |arg_type_name, i| enum_types.push(i) if ENUM_TYPES.include?(arg_type_name) }
+        end
+        # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
+        # Here we do the same and don't need to guard against type_map
+        return false if ret_type_name.nil? || arg_type_names.any?(&:nil?)
+
+        call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
+        rb_func_addr, uniq_id = llvm_jit_function_addr(
+          mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
+          blocking: options[:blocking],
+        )
+        attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
+      end
+
+      def attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
+        if enum_types.empty? && type_mappers.empty?
+          attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_types.size, false)
+        else
+          # mapped.to_native is the same as mapped.converter.to_native
+          # mapped.from_native is the same as mapped.converter.from_native
+          # mapped.native_type is the same as mapped.converter.native_type
+          enums_and_mappers = [options[:enums], type_mappers] # rubocop:disable Lint/UselessAssignment
+          code = <<-CODE
+            @_ffi_jit_enums_and_mappers_#{uniq_id} = enums_and_mappers
+
+            def self.included(base)
+              base.instance_variable_set(:@_ffi_jit_enums_and_mappers_#{uniq_id}, @_ffi_jit_enums_and_mappers_#{uniq_id})
+              super
+            end
+
+            def self.#{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              enums, type_mappers = @_ffi_jit_enums_and_mappers_#{uniq_id}
+              #{
+                arg_types.size.times.map do |i|
+                  next unless type_mappers[i]
+
+                  "type_mappers[#{i}].each { |mapper| arg_#{i} = mapper.to_native(arg_#{i}, nil) }"
+                end.join("\n")
+              }
+              #{enum_types.map { |i| "arg_#{i} = enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
+              res = #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              #{
+                if type_mappers[arg_types.size]
+                  i = arg_types.size
+                  "type_mappers[#{i}].each { |mapper| res = mapper.from_native(res, nil) }"
+                end
+              }
+              res
+            end
+
+            def #{mname}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              enums, type_mappers = self.class.instance_variable_get(:@_ffi_jit_enums_and_mappers_#{uniq_id})
+              #{
+                arg_types.size.times.map do |i|
+                  next unless type_mappers[i]
+
+                  "type_mappers[#{i}].each { |mapper| arg_#{i} = mapper.to_native(arg_#{i}, nil) }"
+                end.join("\n")
+              }
+              #{enum_types.map { |i| "arg_#{i} = enums.__map_symbol(arg_#{i}) if arg_#{i}.is_a?(Symbol)" }.join("\n")}
+              res = #{mname}_#{uniq_id}(#{arg_types.size.times.map { |i| "arg_#{i}" }.join(', ')})
+              #{
+                if type_mappers[arg_types.size]
+                  i = arg_types.size
+                  "type_mappers[#{i}].each { |mapper| res = mapper.from_native(res, nil) }"
+                end
+              }
+              res
+            end
+          CODE
+          attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_types.size, true)
+          module_eval code, __FILE__, __LINE__
+        end
         true
       end
 
-      def attach_llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv)
+      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
-        fn_type = LLVM.Function(
-          arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] },
-          LLVM_TYPES[ret_type_name],
-        )
-        fn_ptr_type = LLVM.Pointer(fn_type)
+        arg_types = arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] }
+        ret_type = LLVM_TYPES[ret_type_name]
+        func_t = LLVM.Function(arg_types, ret_type)
+        func_ptr_t = LLVM.Pointer(func_t)
         # Unnamed, can change '' into :"#{cname}_ptr" for debugging, but unnamed is better to prevent name clashes
-        func_ptr = llvm_mod.globals.add(POINTER, '') do |var|
+        func_ptr = llvm_mod.globals.add(func_ptr_t, '') do |var|
           var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
-          var.initializer = POINTER.from_i(c_address)
+          var.initializer = INTPTR.from_i(c_address).int_to_ptr(func_ptr_t)
+        end
+        void_ret = ret_type_name == :void
+
+        if blocking
+          params_store_fields = [*arg_types, *(ret_type unless void_ret)]
+          params_store_t = LLVM.Struct(*params_store_fields) unless params_store_fields.empty?
+          call_blocking_func = llvm_mod.functions.add(
+            '', [VOID_PTR_T], VOID_PTR_T,
+          ) do |llvm_function, params_store|
+            llvm_function.basic_blocks.append('entry').build do |builder|
+              converted_params = arg_types.map.with_index do |t, i|
+                builder.load2(t, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
+              end
+              ret = emit_cfunc_call(
+                builder, call_conv, converted_params, func_ptr, func_t,
+              )
+              unless void_ret
+                builder.store(
+                  ret, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(arg_types.size)], ''),
+                )
+              end
+              builder.ret(VOID_PTR_T.null)
+            end
+          end
         end
 
-        # Something is wrong in case of name collizion; and even though you can
+        # Something is wrong in case of name collision; and even though you can
         # update rb_func.name=, function_address is still zero
         # Upd: It happens if functions are the same even though their names are different
-
         rb_func = llvm_mod.functions.add(
-          :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (arg_type_names.size + 1), VALUE,
+          :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (1 + arg_type_names.size), VALUE,
         ) do |llvm_function, _rb_self, *params|
-          llvm_function.basic_blocks.append('entry').build do |b|
+          llvm_function.basic_blocks.append('entry').build do |builder|
+            # less readable, but easier that to position builder
+            # TODO: figure out builder.position stuff
+            if blocking
+              params_store = builder.alloca(params_store_t) if params_store_t
+              call_data = builder.alloca(BLOCKING_CALL_T)
+              exc_store = builder.alloca(VALUE)
+            end
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
-              b.call(
+              builder.call(
                 link_external_function(llvm_mod, "ffi_llvm_jit_value_to_#{arg_type}"),
                 param,
               )
             end
-
-            func_ptr_val = b.load2(fn_ptr_type, func_ptr)
-            # See value.rb (Function) and builder.rb (Builder#call2)
-            # func_ptr_val is actually an Instruction, can't set call_conv
-            res = b.call2(fn_type, func_ptr_val, *converted_params)
-            res.call_conv = call_conv if call_conv
-            b.ret(
-              if ret_type_name == :void
-                b.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
+            res = if blocking
+                    emit_blocking_call(
+                      builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func,
+                      void_ret ? nil : ret_type, params_store, call_data,
+                    )
+                  else
+                    emit_cfunc_call(
+                      builder, call_conv, converted_params, func_ptr, func_t,
+                    )
+                  end
+            # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
+            builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
+            # In FFI it's also used to re-raise from callbacks, but here it's only for blocking calls
+            if blocking
+              builder.call(
+                link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store),
+              )
+            end
+            builder.ret(
+              if void_ret
+                builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
               else
-                b.call(
+                # Note for future: in FFI struct layout redefinition doesn't change ffiParameterTypes of
+                #   already attached functions
+                builder.call(
                   link_external_function(llvm_mod, "ffi_llvm_jit_#{ret_type_name}_to_value"),
                   res,
                 )
@@ -230,24 +420,73 @@ module FFI
             )
           end
         end
-        rb_func.verify!
-        llvm_mod.verify!
-        LLVM_MOD.verify!
-        # TODO: investigate what's more performant: function linking or link module into
-        # LLVM_MOD.link_into(llvm_mod)
-        # rb_func.dump
 
-        # Ruby llvm_mod object isn't kept arount and might be GCed, but
-        # it doesn't call +dispose+ automatically, so it's ok.
-        # Note that in function name +llvm_mod.hash+ is used and it
-        # mustn't be reused until the module is disposed, unlike
-        # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
-        LLVM_ENG.modules.add(llvm_mod)
-        # rb_func.name isn't always the same as rb_name, in case of name clashes
-        # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
-        # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
-        attach_rb_wrap_function(rb_name.to_s, LLVM_ENG.function_address(rb_func.name), arg_type_names.size)
-        nil
+        rb_func_addr = LLVM_MUTEX.synchronize do
+          # TODO: investigate what's more performant: function linking or link module into
+          # LLVM_MOD.link_into(llvm_mod)
+          # rb_func.dump
+
+          # Ruby llvm_mod object isn't kept around and might be GCed, but
+          # it doesn't call +dispose+ automatically, so it's ok.
+          # Note that in function name +llvm_mod.hash+ is used and it
+          # mustn't be reused until the module is disposed, unlike
+          # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
+          LLVM_ENG.modules.add(llvm_mod)
+          call_blocking_func&.verify!
+          rb_func.verify!
+          llvm_mod.verify!
+          # rb_func.name isn't always the same as rb_name, in case of name clashes
+          # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
+          # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
+          LLVM_ENG.function_address(rb_func.name)
+        end
+        # I'm not sure whether func addr can be the same in ORC JIT, but I'm pretty sure module address is unique
+        [rb_func_addr, llvm_mod.to_ptr.address]
+      end
+
+      # rubocop:disable Metrics/ParameterLists
+      def emit_blocking_call(
+        builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type,
+        params_store, call_data
+      )
+        builder.store(
+          # Maybe use Qnil here? But const is probably faster
+          VALUE.from_i(0),
+          exc_store,
+        )
+        converted_params.each_with_index do |p, i|
+          builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
+        end
+        builder.store(call_blocking_func, builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(0)], ''))
+        builder.store(
+          params_store || VOID_PTR_T.null,
+          builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''),
+        )
+        builder.call(
+          link_external_function(llvm_mod, 'rb_rescue2'),
+          link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
+          builder.ptr2int(call_data, VALUE),
+          link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
+          builder.ptr2int(exc_store, VALUE),
+          builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
+          VALUE.from_i(0),
+        )
+        return unless ret_type
+
+        builder.load2(
+          ret_type,
+          builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(converted_params.size)], ''),
+        )
+      end
+      # rubocop:enable Metrics/ParameterLists
+
+      def emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
+        func_ptr_val = builder.load(func_ptr)
+        # See value.rb (Function) and builder.rb (Builder#call2)
+        # func_ptr_val is actually an Instruction, can't set call_conv
+        res = builder.call2(func_t, func_ptr_val, *converted_params)
+        res.call_conv = call_conv if call_conv
+        res
       end
 
       def link_external_function(mod, name)
@@ -269,13 +508,13 @@ module FFI
 
       def link_external_global(mod, name)
         unless mod.globals[name]
-          glob = mod.globals.add(LLVM_MOD.globals[name].type, name)
+          glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name]), nil), name)
           glob.linkage = :external
         end
         mod.globals[name]
       end
 
-      # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # rubocop:enable Metrics/MethodLength, Metrics/BlockLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     end
   end
 end

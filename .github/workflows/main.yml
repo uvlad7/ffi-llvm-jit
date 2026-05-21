@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - if: matrix.os == 'llvm-17-dev'
+      - if: matrix.os == 'ubuntu-latest'
         run: sudo apt update && sudo apt install -y --no-install-recommends llvm-17-dev
       - if: matrix.os == 'macos-latest'
         run: brew update && brew install llvm@17 && brew link llvm@17 --force

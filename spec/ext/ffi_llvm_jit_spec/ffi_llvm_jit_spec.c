@@ -1,5 +1,7 @@
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 signed int spec_bool_param(bool val)
 {
@@ -11,12 +13,31 @@ bool spec_bool_ret(signed int val)
     return val == 42;
 }
 
+int spec_enum(int val, char* str) {
+    return val;
+}
+
+signed int spec_converter(signed int val)
+{
+    return -val;
+}
+
 signed char spec_char_to_downcase(signed char val) {
     return val + 32;
 }
 
 unsigned char spec_uchar_to_downcase(unsigned char val) {
     return val + 32;
+}
+
+void spec_blocking_void_ret(unsigned int seconds) {
+}
+
+unsigned int spec_blocking_void_param(void) {
+    return 42;
+}
+
+void spec_blocking_void_ret_void_param(void) {
 }
 
 #if defined(_WIN32) && !defined(_WIN64)

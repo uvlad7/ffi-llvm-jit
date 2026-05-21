@@ -11,7 +11,7 @@ RbConfig::MAKEFILE_CONFIG['LDSHARED'] =
 # RbConfig::MAKEFILE_CONFIG['DLEXT'] = RbConfig::CONFIG['DLEXT'] = 'bc'
 
 # required to push flags without checking
-$CFLAGS << ' -emit-llvm -c ' # rubocop:disable Style/GlobalVars
+$CFLAGS << ' -emit-llvm -c -Werror=implicit-function-declaration ' # rubocop:disable Style/GlobalVars
 
 # MakeMakefile::COMPILE_C = config_string('COMPILE_C') ||
 #   '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG) -c $(CSRCFLAG)$<'

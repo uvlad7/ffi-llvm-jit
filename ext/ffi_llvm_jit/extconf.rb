@@ -6,5 +6,6 @@ require 'mkmf'
 # with other gems. To explicitly export symbols you can use RUBY_FUNC_EXPORTED
 # selectively, or entirely remove this flag.
 append_cflags('-fvisibility=hidden')
+append_cflags('-Werror=implicit-function-declaration')
 
 create_makefile('llvm_jit/ffi_llvm_jit')
