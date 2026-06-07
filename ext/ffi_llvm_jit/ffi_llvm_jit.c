@@ -6,7 +6,7 @@ VALUE rb_mFFILLVMJITLibrary;
 
 // from https://github.com/ffi/ffi/blob/master/ext/ffi_c/Function.c
 static VALUE
-attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc_val)
+attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc_val, VALUE private)
 {
   const char * name = StringValueCStr(name_val);
   VALUE (*func)(ANYARGS);
@@ -16,7 +16,7 @@ attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc
   //   rb_raise(rb_eRuntimeError, "trying to attach function to non-module");
   //   return Qnil;
   // }
-  func = (VALUE (*)(VALUE))NUM2PTR(func_val);
+  func = (VALUE (*)(ANYARGS))NUM2PTR(func_val);
   if (func == NULL)
   {
     rb_raise(rb_eRuntimeError, "trying to attach NULL function");
@@ -24,8 +24,13 @@ attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc
   }
   argc = NUM2INT(argc_val);
   // rb_define_module_function uses rb_define_private_method instead of rb_define_method
-  rb_define_singleton_method(module, name, func, argc);
-  rb_define_method(module, name, func, argc);
+  if (RTEST(private)) {
+    rb_define_private_method(rb_singleton_class(module), name, func, argc);
+    rb_define_private_method(module, name, func, argc);
+  } else {
+    rb_define_singleton_method(module, name, func, argc);
+    rb_define_method(module, name, func, argc);
+  }
 
   // return self;
   return module;
@@ -46,5 +51,5 @@ Init_ffi_llvm_jit(void)
   Qnil
 #endif
   );
-  rb_define_private_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 3);
+  rb_define_private_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 4);
 }

@@ -163,3 +163,35 @@ __attribute__((always_inline)) VALUE ffi_llvm_jit_string_to_value(char * arg) {
 //     /** Custom native type */
 //     NATIVE_MAPPED,
 // } NativeType;
+
+__attribute__((always_inline)) void ffi_llvm_jit_rb_gc_guard(VALUE v) {
+    RB_GC_GUARD(v);
+}
+
+VALUE ffi_llvm_jit_save_exception(VALUE data, VALUE exc) {
+    VALUE* store = (VALUE *) data;
+    *store = exc;
+    return Qnil;
+}
+
+__attribute__((always_inline)) void ffi_llvm_jit_raise_exception(VALUE exc) {
+    // For now, RTEST isn't needed here
+    if (exc) {
+        rb_exc_raise(exc);
+    }
+}
+
+typedef struct
+{
+    void* (*call_blocking_function_fn)(void *);
+    void *params_store;
+} ffi_llvm_jit_blocking_call_t;
+
+VALUE
+ffi_llvm_jit_blocking_call(VALUE data)
+{
+    ffi_llvm_jit_blocking_call_t* call_data = (ffi_llvm_jit_blocking_call_t *) data;
+    rb_thread_call_without_gvl(call_data->call_blocking_function_fn, call_data->params_store, (rb_unblock_function_t *)-1, NULL);
+
+    return Qnil;
+}

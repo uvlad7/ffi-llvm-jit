@@ -23,3 +23,6 @@ Style/TrailingCommaInHashLiteral:
 
 Style/TrailingCommaInArguments:
   EnforcedStyleForMultiline: consistent_comma
+
+Metrics/ParameterLists:
+  CountKeywordArgs: false
