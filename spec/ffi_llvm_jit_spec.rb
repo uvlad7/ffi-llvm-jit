@@ -65,6 +65,12 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_bool_param_ptr.call(false)).to eq(24)
   end
 
+  it 'returns a FFI::Function object for compatibility' do
+    fn = jitlib.attach_function(:strlen4, :strlen, [:string], :size_t)
+    expect(fn).to be_a(FFI::Function)
+    expect(jitlib.attached_functions[:strlen4]).to be(fn)
+  end
+
   it 'allows typedefs' do
     expect(jitlib.attach_llvm_jit_function(:strlen5, :strlen, [:string], :size_t)).to be_nil
     jitlib.typedef :size_t, :length
@@ -188,6 +194,24 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     result = read.read
     Process.wait(pid)
     expect(result).to eq('24')
+  end
+
+  it "doesn't allow attaching new functions after fork" do
+    read, write = IO.pipe
+    pid = Process.fork do
+      read.close
+      begin
+        jitlib.attach_llvm_jit_function :strlen8, :strlen, [:string], :size_t
+        write.write('no error raised')
+      rescue described_class::UnsupportedError => e
+        write.write(e.inspect)
+      end
+      exit!(0)
+    end
+    write.close
+    result = read.read
+    Process.wait(pid)
+    expect(result).to eq("#<FFI::LLVMJIT::UnsupportedError: Can't use LLVM after fork>")
   end
 
   it 'saves errno' do
