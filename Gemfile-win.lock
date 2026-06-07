@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    ffi-llvm-jit (0.1.0)
+    ffi-llvm-jit (0.2.0)
       ffi (~> 1.15)
       ruby-llvm (>= 14)
 
