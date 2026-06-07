@@ -55,7 +55,22 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     cb = FFI::CallbackInfo.new(FFI.find_type(:int), [FFI.find_type(:pointer), FFI.find_type(:pointer)])
     expect do
       jitlib.attach_llvm_jit_function :qsort, [:pointer, :size_t, :size_t, cb], :void
-    end.to raise_error(NotImplementedError)
+    end.to raise_error(
+      FFI::LLVMJIT::UnsupportedError,
+      "Unsupported argument type: #{cb.inspect}",
+    )
+    jitlib.attach_function :qsort, [:pointer, :size_t, :size_t, cb], :void
+
+    cb2 = FFI::CallbackInfo.new(FFI.find_type(:int), [FFI.find_type(:bool)])
+    expect do
+      jitlib.attach_llvm_jit_function :spec_bool_param_ptr, [], cb2
+    end.to raise_error(
+      FFI::LLVMJIT::UnsupportedError,
+      "Unsupported return type: #{cb2.inspect}",
+    )
+    jitlib.attach_function :spec_bool_param_ptr, [], cb2
+    expect(jitlib.spec_bool_param_ptr.call(true)).to eq(42)
+    expect(jitlib.spec_bool_param_ptr.call(false)).to eq(24)
   end
 
   it 'allows typedefs' do
@@ -159,7 +174,10 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   it "doesn't accept void parameters" do
     expect do
       jitlib.attach_llvm_jit_function :memset, %i[string void size_t], :void
-    end.to raise_error(NotImplementedError)
+    end.to raise_error(
+      FFI::LLVMJIT::UnsupportedError,
+      'Unsupported argument type: #<FFI::Type::Builtin::VOID size=1 alignment=1>',
+    )
     # Surprisignly, FFI allows that, but
     #   jitlib.memset("", nil, 0)
     # would raise
