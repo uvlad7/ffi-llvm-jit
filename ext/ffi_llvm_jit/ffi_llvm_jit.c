@@ -16,7 +16,7 @@ attach_rb_wrap_function(VALUE module, VALUE name_val, VALUE func_val, VALUE argc
   //   rb_raise(rb_eRuntimeError, "trying to attach function to non-module");
   //   return Qnil;
   // }
-  func = (VALUE (*)(VALUE))NUM2PTR(func_val);
+  func = (VALUE (*)(ANYARGS))NUM2PTR(func_val);
   if (func == NULL)
   {
     rb_raise(rb_eRuntimeError, "trying to attach NULL function");

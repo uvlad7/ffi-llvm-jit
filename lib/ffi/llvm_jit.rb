@@ -142,6 +142,10 @@ module FFI
       # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
+        # TODO: support LLVM call_conv; note that function_names must be patched for that
+        # (they also forgot an underscore on Windows for cdecl)
+        # https://en.wikipedia.org/wiki/Name_mangling#C
+        # (see core_ffi.rb and https://llvm.org/doxygen/namespacellvm_1_1CallingConv.html)
         mname, cname, arg_types, ret_type, options = convert_attach_function_params(name, func, args, returns, options)
         function_handle = find_function_handle(cname, arg_types)
         attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: true)
@@ -149,8 +153,6 @@ module FFI
 
       private
 
-      # @note Return type doesn't match the original method, but it's usually not used
-      # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
       def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
         if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
           return if jit_only
@@ -166,7 +168,8 @@ module FFI
       end
 
       def attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
-	return unless INIT_PID == Process.pid
+        # TODO: make it more transparent
+        return unless INIT_PID == Process.pid
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
         return false unless unknown_options.empty?
@@ -206,8 +209,12 @@ module FFI
           mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
           blocking: options[:blocking],
         )
+        attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
+      end
+
+      def attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
         if enum_types.empty? && type_mappers.empty?
-          attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_type_names.size, false)
+          attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_types.size, false)
         else
           # mapped.to_native is the same as mapped.converter.to_native
           # mapped.from_native is the same as mapped.converter.from_native
@@ -261,7 +268,7 @@ module FFI
               res
             end
           CODE
-          attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_type_names.size, true)
+          attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_types.size, true)
           module_eval code, __FILE__, __LINE__
         end
         true
