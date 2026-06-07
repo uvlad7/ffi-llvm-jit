@@ -8,6 +8,11 @@ signed int spec_bool_param(bool val)
     return val ? 42 : 24;
 }
 
+typedef signed int (*bool_param_ptr)(bool);
+bool_param_ptr spec_bool_param_ptr() {
+    return spec_bool_param;
+}
+
 bool spec_bool_ret(signed int val)
 {
     return val == 42;

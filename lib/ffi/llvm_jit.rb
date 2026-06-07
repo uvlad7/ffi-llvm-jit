@@ -18,7 +18,6 @@ module FFI
 
   # Ruby FFI JIT using LLVM
   module LLVMJIT
-
     class UnsupportedError < RuntimeError; end
 
     # Extension to FFI::Library to support JIT compilation using LLVM
@@ -202,15 +201,10 @@ module FFI
       ###### End ######
 
       def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
-        if attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
-          return if jit_only
+        attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
+      rescue UnsupportedError
+        raise if jit_only
 
-          invoker = Function.new(ret_type, arg_types, function_handle, options)
-          @ffi_functions ||= {}
-          @ffi_functions[mname.to_s.to_sym] = invoker
-          return invoker
-        end
-        raise NotImplementedError, "Cannot create JIT function #{mname}" if jit_only
         # Part copied from refactored FFI for compatibility
         invoker = if arg_types[-1] == FFI::NativeType::VARARGS
                     VariadicInvoker.new(function_handle, arg_types, ret_type, options)
@@ -219,14 +213,22 @@ module FFI
                   end
         invoker.attach(self, mname.to_s)
         invoker
+      else
+        return if jit_only
+
+        invoker = Function.new(ret_type, arg_types, function_handle, options)
+        @ffi_functions ||= {}
+        @ffi_functions[mname.to_s.to_sym] = invoker
+        invoker
       end
 
-      def attach_llvm_jit_function_handle?(function_handle, mname, arg_types, ret_type, options)
-        # TODO: make it more transparent
-        return unless INIT_PID == Process.pid
+      def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
+        raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
-        return false unless unknown_options.empty?
+        unless unknown_options.empty?
+          raise UnsupportedError, "Unsupported option#{'s' if unknown_options.size > 1}: #{unknown_options.join(', ')}"
+        end
 
         type_mappers = []
         arg_types = arg_types.map.with_index do |arg_type, i|
@@ -248,15 +250,21 @@ module FFI
         # TODO: support call_without_gvl
         # Variadic functions are not supported; we could support known arguments,
         # but we'd still need to know use libffi to create varargs
-        ret_type_name = SUPPORTED_FROM_NATIVE[ret_type]
-        arg_type_names = arg_types.map { |arg_type| SUPPORTED_TO_NATIVE[arg_type] }
+        ret_type_name = SUPPORTED_FROM_NATIVE.fetch(ret_type) do
+          raise UnsupportedError, "Unsupported return type: #{ret_type.inspect}"
+        end
+
+        arg_type_names = arg_types.map do |arg_type|
+          SUPPORTED_TO_NATIVE.fetch(arg_type) do
+            raise UnsupportedError, "Unsupported argument type: #{arg_type.inspect}"
+          end
+        end
         enum_types = []
         unless options[:enums].nil?
           arg_type_names.each_with_index { |arg_type_name, i| enum_types.push(i) if ENUM_TYPES.include?(arg_type_name) }
         end
         # Value type_map from opts is ignored by FFI for regular functions and is used only in Variadic
         # Here we do the same and don't need to guard against type_map
-        return false if ret_type_name.nil? || arg_type_names.any?(&:nil?)
 
         call_conv = options[:convention]&.to_s == 'stdcall' ? LLVM_STDCALL : nil
         rb_func_addr, uniq_id = llvm_jit_function_addr(
@@ -266,6 +274,7 @@ module FFI
         attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
       end
 
+      # rubocop:disable Metrics/ParameterLists
       def attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
         if enum_types.empty? && type_mappers.empty?
           attach_rb_wrap_function(mname.to_s, rb_func_addr, arg_types.size, false)
@@ -325,8 +334,8 @@ module FFI
           attach_rb_wrap_function("#{mname}_#{uniq_id}", rb_func_addr, arg_types.size, true)
           module_eval code, __FILE__, __LINE__
         end
-        true
       end
+      # rubocop:enable Metrics/ParameterLists
 
       def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
         # AFAIK name doesn't need to be unique
