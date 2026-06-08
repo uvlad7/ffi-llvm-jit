@@ -236,7 +236,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   it 'saves errno in blocking calls' do
     jitlib.attach_llvm_jit_function :strtoul, %i[string pointer int], :ulong
     FFI.errno = 0
-    ulong_max = 2**(FFI.type_size(:long) * 8) - 1
+    ulong_max = (2**(FFI.type_size(:long) * 8)) - 1
     expect(jitlib.strtoul('42' * 10, nil, 10)).to eq(ulong_max)
     expect(FFI.errno).to eq(Errno::ERANGE::Errno)
     FFI.errno = 0
