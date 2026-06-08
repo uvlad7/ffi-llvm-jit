@@ -12,6 +12,14 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     end
   end
 
+  let(:point_struct) do
+    Class.new(FFI::Struct) do
+      layout :x, :int32, :y, :int32
+
+      def self.release(*); end
+    end
+  end
+
   let(:stdcall_jitlib) do
     Module.new.tap do |mod|
       mod.extend described_class::Library
@@ -49,7 +57,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       jitlib.attach_llvm_jit_function :qsort, [:pointer, :size_t, :size_t, cb], :void
     end.to raise_error(
       FFI::LLVMJIT::UnsupportedError,
-      'Unsupported argument type: #<FFI::Type::Builtin::POINTER size=8 alignment=8>',
+      "Unsupported argument type: #{cb.inspect}",
     )
     jitlib.attach_function :qsort, [:pointer, :size_t, :size_t, cb], :void
 
@@ -215,7 +223,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno' do
-    jitlib.attach_llvm_jit_function :strtol, %i[string string int], :long
+    jitlib.attach_llvm_jit_function :strtol, %i[string pointer int], :long
     FFI.errno = 0
     long_max = (2**((FFI.type_size(:long) * 8) - 1)) - 1
     expect(jitlib.strtol('42' * 10, nil, 10)).to eq(long_max)
@@ -226,7 +234,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno in blocking calls' do
-    jitlib.attach_llvm_jit_function :strtoul, %i[string string int], :ulong
+    jitlib.attach_llvm_jit_function :strtoul, %i[string pointer int], :ulong
     FFI.errno = 0
     ulong_max = (2**(FFI.type_size(:long) * 8)) - 1
     expect(jitlib.strtoul('42' * 10, nil, 10)).to eq(ulong_max)
@@ -253,16 +261,14 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno in interrupted blocking call (read)' do
-    jitlib.attach_llvm_jit_function :read_jit, :read, %i[int string size_t], :ssize_t, blocking: true
+    jitlib.attach_llvm_jit_function :read_jit, :read, %i[int buffer_out size_t], :ssize_t, blocking: true
 
     read_io, = IO.pipe
     read_io.nonblock = false
-    buf = ' ' * 6
+    buf = FFI::Buffer.new_out(:char, 5)
     thread = Thread.new do
       FFI.errno = 0
       begin
-        # Strings shouldn't be used as buffers, but for spec purposes it's fine
-        # (and nothing is actually going to be written to it)
         jitlib.read_jit(read_io.fileno, buf, 4)
       rescue RuntimeError
         { errno: FFI.errno }
@@ -326,22 +332,73 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_uchar_to_downcase(127)).to eq(159)
   end
 
+  it 'supports pointer args' do
+    jitlib.attach_llvm_jit_function :memcpy, %i[pointer pointer size_t], :void
+    src = FFI::MemoryPointer.new(:uint8, 4)
+    dst = FFI::MemoryPointer.new(:uint8, 4)
+    src.put_bytes(0, "\x01\x02\x03\x04")
+    jitlib.memcpy(dst, src, 4)
+    expect(dst.get_bytes(0, 4)).to eq("\x01\x02\x03\x04")
+  end
+
+  it 'supports buffer args' do
+    jitlib.attach_llvm_jit_function :memcpy, %i[buffer_out buffer_in size_t], :void
+    src = FFI::Buffer.new_in(:char, 4)
+    dst = FFI::Buffer.new_out(:char, 4)
+    src.put_bytes(0, "\x01\x02\x03\x04")
+    jitlib.memcpy(dst, src, 4)
+    expect(dst.get_bytes(0, 4)).to eq("\x01\x02\x03\x04")
+  end
+
+  it 'supports buffer_inout args' do
+    jitlib.attach_llvm_jit_function :strcat, %i[buffer_inout buffer_in], :pointer
+    dst = FFI::Buffer.new_inout(:char, 12)
+    src = FFI::Buffer.new_in(:uint8, 7)
+    dst.put_string(0, 'hello')
+    src.put_string(0, ' world')
+    jitlib.strcat(dst, src)
+    expect(dst.get_string(0)).to eq('hello world')
+  end
+
+  it 'supports pointer return values' do
+    jitlib.attach_llvm_jit_function :strdup, [:pointer], :pointer
+    ptr = jitlib.strdup('hello')
+    expect(ptr).to be_a(FFI::Pointer)
+    expect(ptr.read_string).to eq('hello')
+  end
+
+  it 'supports struct return value' do
+    # TODO: by_value (StructByValue)
+    jitlib.attach_llvm_jit_function :spec_make_point, %i[int32 int32], point_struct
+    ptr = jitlib.spec_make_point(4, 2)
+    expect(ptr).to be_a(FFI::Pointer)
+    point = point_struct.new(ptr)
+    expect(point[:x]).to eq(4)
+    expect(point[:y]).to eq(2)
+  end
+
+  it 'supports struct args' do
+    # TODO: by_ref (mapped), by_value (StructByValue)
+    jitlib.attach_llvm_jit_function :spec_point_sum, [point_struct], :int32
+    point = point_struct.new
+    point[:x] = 10
+    point[:y] = 32
+    expect(jitlib.spec_point_sum(point)).to eq(42)
+    expect(jitlib.spec_point_sum(point.to_ptr)).to eq(42)
+  end
+
   it 'supports mapped values' do
-    mapper = Class.new do
-      extend FFI::DataConverter
-      native_type FFI::Type::INT
+    jitlib.attach_llvm_jit_function :spec_make_point, %i[int32 int32], point_struct.auto_ptr
+    jitlib.attach_llvm_jit_function :spec_point_sum, [point_struct.by_ref], :int32
 
-      def self.to_native(value, _context)
-        value**2
-      end
-
-      def self.from_native(value, _context)
-        value * 2
-      end
-    end
-
-    jitlib.attach_llvm_jit_function :spec_converter, [mapper], mapper
-    expect(jitlib.spec_converter(10)).to eq(-200)
+    point = jitlib.spec_make_point(10, 32)
+    expect(point).to be_a(point_struct)
+    expect(point[:x]).to eq(10)
+    expect(point[:y]).to eq(32)
+    expect(jitlib.spec_point_sum(point)).to eq(42)
+    expect { jitlib.spec_point_sum(point.to_ptr) }.to raise_error(
+      TypeError, "wrong argument type FFI::AutoPointer (expected #{point_struct.inspect})",
+    )
   end
 
   it 'supports stacked mapped values' do
@@ -394,11 +451,11 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'supports blocking calls (read)' do
-    jitlib.attach_llvm_jit_function :read_jit, :read, %i[int string size_t], :ssize_t, blocking: true
+    jitlib.attach_llvm_jit_function :read_jit, :read, %i[int buffer_out size_t], :ssize_t, blocking: true
     read_io, write_io = IO.pipe
     read_io.nonblock = false
     write_io.write('abc')
-    buf = ' ' * 6
+    buf = FFI::Buffer.new_out(:char, 5)
     expect(jitlib.read_jit(read_io.fileno, buf, 3)).to eq(3)
 
     thread = Thread.new { jitlib.read_jit(read_io.fileno, buf, 4) }

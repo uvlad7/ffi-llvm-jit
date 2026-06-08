@@ -31,12 +31,9 @@ module FFI
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
-      LLVM::C.add_symbol(
-        'ffi_llvm_jit_save_errno',
-        FFI::DynamicLibrary.send(
-          :load_library, FFI::CURRENT_PROCESS, nil,
-        ).find_function('rbffi_save_errno'),
-      )
+      reg_converter = proc { |fn_name, fn_ptr| LLVM::C.add_symbol("ffi_llvm_jit_#{fn_name}", fn_ptr) }
+      FFI.send(:value_to_native_converters, &reg_converter)
+      FFI.send(:native_to_value_converters, &reg_converter)
 
       LLVM.init_jit
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
@@ -88,6 +85,17 @@ module FFI
         double: LLVM::Double,
         bool: LLVM::Int1,
         string: LLVM.Pointer(LLVM.const_get("Int#{FFI.type_size(:char) * 8}")),
+        pointer: LLVM.Pointer(LLVM.Void),
+        buffer_in: LLVM.Pointer(LLVM.Void),
+        buffer_out: LLVM.Pointer(LLVM.Void),
+        buffer_inout: LLVM.Pointer(LLVM.Void),
+        # TODO: long_double
+        # long double is tricky - it can be an alias to double, can be x86fp80 - which can be 12 or 16 bytes,
+        # fp128, ppcfp128
+        # https://en.wikipedia.org/wiki/Long_double
+        # TODO: float128
+        # TODO: int128
+        # TODO: float16/half
       }.freeze
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
@@ -133,13 +141,6 @@ module FFI
 
       # rubocop:disable Metrics/MethodLength, Metrics/BlockLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
-      # @see https://www.rubydoc.info/gems/ffi/FFI/Library#attach_function-instance_method FFI::Library.attach_function
-      def attach_function(name, func, args, returns = nil, options = nil)
-        mname, cname, arg_types, ret_type, options = convert_attach_function_params(name, func, args, returns, options)
-        function_handle = find_function_handle(cname, arg_types)
-        attach_function_handle(function_handle, mname, arg_types, ret_type, options)
-      end
-
       # Same as +attach_function+, but raises an exception if cannot create JIT function
       # instead of falling back to the regular FFI function
       def attach_llvm_jit_function(name, func, args, returns = nil, options = nil)
@@ -154,65 +155,12 @@ module FFI
 
       private
 
-      # Part copied from refactored FFI for compatibility
-
-      def convert_attach_function_params(name, func, args, returns, options)
-        mname = name
-        a2 = func
-        a3 = args
-        a4 = returns
-        a5 = options
-        cname, arg_types, ret_type, opts = if a4 && (a2.is_a?(String) || a2.is_a?(Symbol))
-                                             [a2, a3, a4, a5]
-                                           else
-                                             [mname.to_s, a2, a3, a4]
-                                           end
-        # Convert :foo to the native type
-        arg_types = arg_types.map { |e| find_type(e) }
-        ret_type = find_type(ret_type)
-        options = {
-          convention: ffi_convention,
-          type_map: defined?(@ffi_typedefs) ? @ffi_typedefs : nil,
-          blocking: defined?(@blocking) && @blocking,
-          enums: defined?(@ffi_enums) ? @ffi_enums : nil,
-        }
-
-        @blocking = false
-        options.merge!(opts) if opts.is_a?(Hash)
-
-        [mname, cname, arg_types, ret_type, options]
-      end
-
-      def find_function_handle(cname, arg_types)
-        ffi_libraries.each do |lib|
-          begin
-            function_names(cname, arg_types).each do |fname|
-              fn = lib.find_function(fname)
-              return fn if fn
-            end
-          rescue LoadError
-            # Ignored
-          end
-        end
-
-        raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name))
-      end
-
-      ###### End ######
-
       def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
         attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
       rescue UnsupportedError
         raise if jit_only
 
-        # Part copied from refactored FFI for compatibility
-        invoker = if arg_types[-1] == FFI::NativeType::VARARGS
-                    VariadicInvoker.new(function_handle, arg_types, ret_type, options)
-                  else
-                    Function.new(ret_type, arg_types, function_handle, options)
-                  end
-        invoker.attach(self, mname.to_s)
-        invoker
+        super(function_handle, mname, arg_types, ret_type, options)
       else
         return if jit_only
 
