@@ -244,6 +244,41 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(FFI.errno).to eq(0)
   end
 
+  it 'saves errno in interrupted blocking call (sleep)' do
+    jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true
+
+    thread = Thread.new do
+      FFI.errno = 0
+      begin
+        jitlib.sleep_jit(3600)
+      rescue RuntimeError
+        { errno: FFI.errno }
+      end
+    end
+    sleep(0.1) until thread.stop?
+    thread.raise('Wake up')
+    expect(thread.value).to eq({ errno: Errno::EINTR::Errno })
+  end
+
+  it 'saves errno in interrupted blocking call (read)' do
+    jitlib.attach_llvm_jit_function :read_jit, :read, %i[int buffer_out size_t], :ssize_t, blocking: true
+
+    read_io, = IO.pipe
+    read_io.nonblock = false
+    buf = FFI::Buffer.new_out(:char, 5)
+    thread = Thread.new do
+      FFI.errno = 0
+      begin
+        jitlib.read_jit(read_io.fileno, buf, 4)
+      rescue RuntimeError
+        { errno: FFI.errno }
+      end
+    end
+    sleep(0.1) until thread.stop?
+    thread.raise('Wake up')
+    expect(thread.value).to eq({ errno: Errno::EINTR::Errno })
+  end
+
   it 'supports long long' do
     jitlib.attach_llvm_jit_function :strtoull, %i[string string int], :ulong_long
     jitlib.attach_llvm_jit_function :strtoll, %i[string string int], :long_long
@@ -397,22 +432,39 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_converter('10')).to eq(:'-200')
   end
 
-  it 'supports blocking calls' do
-    jitlib.attach_llvm_jit_function :read_pipe, :read, %i[int buffer_out size_t], :ssize_t, blocking: true
+  it 'supports blocking calls (sleep)' do
+    # sleep(seconds) takes a uint, returns uint (seconds remaining); safe to use as a long-running blocker
+    jitlib.attach_llvm_jit_function :sleep_jit, :sleep, [:uint], :uint, blocking: true
+    expect(jitlib.sleep_jit(0)).to eq(0)
 
-    read_io, write_io = IO.pipe
-    read_io.nonblock = false
-    write_io.write('abc')
-    buf = FFI::Buffer.new_out(:char, 5)
-    expect(jitlib.read_pipe(read_io.fileno, buf, 3)).to eq(3)
-
-    thread = Thread.new { jitlib.read_pipe(read_io.fileno, buf, 4) }
+    thread = Thread.new { jitlib.sleep_jit(3600) } # 1 hour — guaranteed to block
     sleep(0.1) until thread.stop?
     # Without blocking it's just stuck here
     thread.kill
     expect(thread.value).to be_nil
 
-    thread = Thread.new { jitlib.read_pipe(read_io.fileno, buf, 4) }
+    thread = Thread.new { jitlib.sleep_jit(3600) }
+    thread.report_on_exception = false
+    sleep(0.1) until thread.stop?
+    thread.raise('Ooops')
+    expect { thread.value }.to raise_error(RuntimeError, 'Ooops')
+  end
+
+  it 'supports blocking calls (read)' do
+    jitlib.attach_llvm_jit_function :read_jit, :read, %i[int buffer_out size_t], :ssize_t, blocking: true
+    read_io, write_io = IO.pipe
+    read_io.nonblock = false
+    write_io.write('abc')
+    buf = FFI::Buffer.new_out(:char, 5)
+    expect(jitlib.read_jit(read_io.fileno, buf, 3)).to eq(3)
+
+    thread = Thread.new { jitlib.read_jit(read_io.fileno, buf, 4) }
+    sleep(0.1) until thread.stop?
+    # Without blocking it's just stuck here
+    thread.kill
+    expect(thread.value).to be_nil
+
+    thread = Thread.new { jitlib.read_jit(read_io.fileno, buf, 4) }
     thread.report_on_exception = false
     sleep(0.1) until thread.stop?
     thread.raise('Ooops')
