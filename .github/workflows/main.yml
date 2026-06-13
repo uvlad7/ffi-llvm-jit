@@ -30,15 +30,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - if: runner.os == 'Linux'
+
+      - name: Set versions
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17 clang
-          if [ -n '${{ matrix.default_clang }}' ]; then
+          if [ '${{ matrix.default_clang }}' = 'true' ]; then
             echo "CLANG=clang" >> "$GITHUB_ENV"
             echo "CLANGXX=clang++" >> "$GITHUB_ENV"
           fi
+
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17
+
       - if: runner.os == 'macOS'
-        run: brew update && brew install llvm@17 && brew link llvm@17 --force
+        run: |
+          brew update && brew install llvm@17
+          LLVM_PREFIX=$(brew --prefix llvm@17)
+          echo "LLVM_CONFIG=${LLVM_PREFIX}/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${LLVM_PREFIX}/lib" >> "$GITHUB_ENV"
       # - if: runner.os == 'Windows'
       #   shell: cmd
       #   run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
@@ -98,13 +107,13 @@ jobs:
           - os: ubuntu-latest
             gemfile: llvm_21_1_0
             default_clang: true
-          - os: ubuntu-24.04-arm
+          - os: macos-latest
             gemfile: llvm_18_2_0
             default_clang: true
-          - os: ubuntu-24.04-arm
+          - os: macos-latest
             gemfile: llvm_20_1_7
             default_clang: true
-          - os: ubuntu-24.04-arm
+          - os: macos-latest
             gemfile: llvm_21_1_0
             default_clang: true
           - os: macos-15-intel
@@ -113,7 +122,7 @@ jobs:
           - os: ubuntu-24.04-arm
             gemfile: ''
             default_clang: false
-          - os: ubuntu-24.04-arm
+          - os: macos-latest
             gemfile: ''
             default_clang: true
 
@@ -126,6 +135,10 @@ jobs:
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
           RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
           echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
+          if [ '${{ matrix.default_clang }}' = 'true' ]; then
+            echo "CLANG=clang" >> "$GITHUB_ENV"
+            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
+          fi
 
       - if: runner.os == 'Linux'
         run: |
@@ -136,14 +149,13 @@ jobs:
               sudo tee /etc/apt/sources.list.d/llvm.list
           fi
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}" clang
-          if [ -n '${{ matrix.default_clang }}' ]; then
-            echo "CLANG=clang" >> "$GITHUB_ENV"
-            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
-          fi
+          sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
       - if: runner.os == 'macOS'
-        # In macOS we change the default clang, but on Ubuntu it's still available, that's why we test two options
-        run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
+        run: |
+          brew update && brew install "llvm@${LLVM_MAJOR_VERSION}"
+          LLVM_PREFIX=$(brew --prefix "llvm@${LLVM_MAJOR_VERSION}")
+          echo "LLVM_CONFIG=${LLVM_PREFIX}/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${LLVM_PREFIX}/lib" >> "$GITHUB_ENV"
 
       - uses: ruby/setup-ruby@v1
         with:
