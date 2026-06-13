@@ -1,19 +1,20 @@
-name: Ruby
+name: CI
 
 on:
   push:
     branches:
       - main
-
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  build:
+  simple:
     runs-on: ${{ matrix.os }}
-    env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
-      BUNDLE_GEMFILE: "${{ matrix.os == 'windows-latest' && 'Gemfile-win' || 'Gemfile' }}"
+    # env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
+      # BUNDLE_GEMFILE: "${{ runner.os == 'Windows' && 'gemfiles/Gemfile-win' || 'Gemfile' }}"
     name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os:
           # - windows-latest - unable to install ruby-llvm
@@ -21,21 +22,84 @@ jobs:
           - ubuntu-latest
         ruby:
           - '3.3'
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17
+      - if: runner.os == 'macOS'
+        run: brew update && brew install llvm@17 && brew link llvm@17 --force
+      # - if: runner.os == 'Windows'
+      #   shell: cmd
+      #   run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          rubygems: 3.6.9
+      - run: bundle exec rake
+
+  full:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    env:
+      BUNDLE_GEMFILE: gemfiles/Gemfile-${{ matrix.gemfile }}
+    name: Ruby ${{ matrix.ruby }}, ${{ matrix.gemfile }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-13          # x86_64
+          - macos-latest      # arm64
+          - ubuntu-latest     # x86_64
+          - ubuntu-24.04-arm  # arm64
+        # Ruby:
+        #  2.7    oldest supported
+        #  3.2    mature Ruby 3 baseline
+        #  3.4    latest stable Ruby 3
+        #  4.0    future/next major
+        # LLVM:
+        #  14.0.0  oldest supported
+        #  15.0.4  opaque pointer transition era
+        #  18.2.0  mature modern LLVM
+        #  20.1.7  current stable generation
+        #  21.1.0  newest generation
+        gemfile:
+          - ruby_2_7
+          - ruby_3_2
+          - ruby_3_4
+          - ruby_4_0
+          - llvm_14_0_0
+          - llvm_15_0_4
+          - llvm_18_2_0
+          - llvm_20_1_7
+          - llvm_21_1_0
+          - ffi_1_15_5
+          - ffi_1_16_3
 
     steps:
       - uses: actions/checkout@v4
-      - if: matrix.os == 'ubuntu-latest'
-        run: sudo apt update && sudo apt install -y --no-install-recommends llvm-17-dev
-      - if: matrix.os == 'macos-latest'
-        run: brew update && brew install llvm@17 && brew link llvm@17 --force
-      - if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+
+      - name: Set versions
+        run: |
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -n 's/llvm_\([0-9]\+\).*/\1/p')
+          echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
+          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -n 's/ruby_\([0-9]\+\(_[0-9]\+\)*\).*/\1/p' | tr '_' '.')
+          echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
+
+      - if: runner.os == 'Linux'
+        run: |
+          wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
+            sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg] http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc)-${LLVM_MAJOR_VERSION} main" | \
+            sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
+      - if: runner.os == 'macOS'
+        run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
+
+      - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby }} # Not needed with a .ruby-version, .tool-versions or mise.toml
+          ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          rubygems: 3.6.9
-      - name: Run the default task
-        run: bundle exec rake
+
+      - run: bundle exec rake

@@ -15,7 +15,8 @@ Gem::Specification.new do |spec|
                      'Works only on MRI'
   spec.homepage = 'https://github.com/uvlad7/ffi-llvm-jit'
   spec.license = 'MIT'
-  spec.required_ruby_version = '>= 2.3.8'
+  # because of ruby-llvm that requires ruby 2.7 since version 13.0.0
+  spec.required_ruby_version = '>= 2.7'
   spec.required_rubygems_version = '>= 3.2.3'
 
   # spec.metadata['allowed_push_host'] = "https://rubygems.org"
@@ -40,27 +41,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'ruby-llvm', '>= 14'
 
   spec.requirements.push('llvm-14-dev or newer')
-
-  spec.add_development_dependency 'pry', '0.14.2'
-  spec.add_development_dependency 'pry-byebug', '3.10.1'
-
-  spec.add_development_dependency 'benchmark-ips', '~> 2.14'
-  spec.add_development_dependency 'strlen', '~> 1.0'
-  # Only because its major version matches required llvm version and I have llvm-17 installed
-  spec.add_development_dependency 'ruby-llvm', (Gem.win_platform? ? '~> 20' : '~> 17')
-
-  spec.add_development_dependency 'ffi-compiler', '~> 1.3'
-
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
 
-  spec.add_development_dependency 'rake', '~> 13.0'
-
-  spec.add_development_dependency 'rake-compiler'
-
-  spec.add_development_dependency 'rspec', '~> 3.0'
-
-  spec.add_development_dependency 'rubocop', '~> 1.21'
-
-  spec.add_development_dependency 'yard', '~> 0.9.37'
+  # Development dependencies are in Gemfile, versioned via BUNDLE_GEMFILE symlinks in gemfiles/
 end
