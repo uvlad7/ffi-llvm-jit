@@ -184,31 +184,32 @@ jobs:
   musl:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    container: alpine:3.21
+    container: ${{ matrix.container }}
     env:
       BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
-    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on alpine-3.21
+    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
-        gemfile: ['', 'llvm_21_1_0', 'ruby_3_4']
+        include:
+          # ruby/setup-ruby is incompatible with musl so we use apk ruby
+          # alpine:3.21 has llvm18-19 and ruby3.3
+          - {gemfile: '', container: 'alpine:3.21'}
+          # alpine:3.23 has llvm18-21 and ruby3.4
+          - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23'}
     steps:
       - name: Bootstrap
         shell: sh
-        run: apk add --no-cache bash git nodejs build-base
+        run: apk add --no-cache ruby ruby-dev ruby-bundler
       - name: Set versions
         run: |
           LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/llvm_([0-9]+).*/\1/p')
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
-          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
-          echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Install LLVM
         run: apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ env.RUBY_VERSION }}
-          bundler-cache: true
+      - name: Install gems
+        run: bundle config set --local frozen true && bundle install
       - run: bundle exec rake
 
   freebsd:
@@ -221,14 +222,17 @@ jobs:
         arch: [x86_64, aarch64, riscv64]
     steps:
       - uses: actions/checkout@v4
-      - uses: cross-platform-actions/action@v1.2.0
+      - uses: vmactions/freebsd-vm@v1
         with:
-          operating_system: freebsd
-          architecture: ${{ matrix.arch }}
-          version: '14.4'
+          release: '14.4'
+          arch: ${{ matrix.arch }}
+          usesh: true
+          prepare: |
+            pkg update
+            pkg install -y llvm18 ruby33 ruby33-gems
           run: |
-            sudo pkg install -y llvm18 ruby33 ruby33-gems
             export LLVM_CONFIG=llvm-config18
             gem install bundler --no-document
+            bundle config set --local frozen true
             bundle install
             bundle exec rake
