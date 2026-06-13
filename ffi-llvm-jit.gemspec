@@ -38,9 +38,9 @@ Gem::Specification.new do |spec|
   spec.extensions = ['ext/llvm_bitcode/extconf.rb', 'ext/ffi_llvm_jit/extconf.rb']
 
   spec.add_dependency 'ffi', '~> 1.15'
-  spec.add_dependency 'ruby-llvm', '>= 14'
+  spec.add_dependency 'ruby-llvm', '>= 17.0.0', '<= 21.1.0'
 
-  spec.requirements.push('llvm-14-dev or newer')
+  spec.requirements.push('llvm-17-dev or newer')
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
 

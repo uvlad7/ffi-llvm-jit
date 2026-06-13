@@ -69,8 +69,8 @@ jobs:
           - ruby_3_2
           - ruby_3_4
           - ruby_4_0
-          - llvm_14_0_0
-          - llvm_15_0_4
+          # - llvm_14_0_0
+          # - llvm_15_0_4
           - llvm_18_2_0
           - llvm_20_1_7
           - llvm_21_1_0
