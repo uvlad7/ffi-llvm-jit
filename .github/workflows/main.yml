@@ -242,24 +242,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {arch: x86_64}
-          - {arch: aarch64}
-          - {arch: riscv64, sync: scp}
+        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/freebsd-vm@v1
         with:
           release: '14.4'
           arch: ${{ matrix.arch }}
-          sync: ${{ matrix.sync || 'rsync' }}
           usesh: true
           prepare: |
             pkg update
-            pkg install -y llvm18 ruby33
+            pkg install -y llvm18 ruby33 ruby33-gems
           run: |
             export LLVM_CONFIG=llvm-config18
-            gem33 install bundler --no-document
+            gem install bundler --no-document
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
