@@ -167,6 +167,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rbenv/ruby-build
+          ref: v20260520
           path: tmp/ruby-build
 
       - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
@@ -251,6 +252,7 @@ jobs:
           arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
+            sed -i '' 's/latest/quarterly/' /etc/pkg/FreeBSD.conf
             pkg update
             pkg install -y llvm18 ruby33 ruby33-gems
           run: |

@@ -5,16 +5,22 @@ require 'rspec/core/rake_task'
 
 RSpec::Core::RakeTask.new(:spec)
 
-require 'rubocop/rake_task'
+begin
+  require 'rubocop/rake_task'
+  RuboCop::RakeTask.new
+rescue LoadError => e
+  task(:rubocop) { raise e }
+end
 
-RuboCop::RakeTask.new
-
-require 'yard'
-
-YARD::Rake::YardocTask.new do |t|
-  # use .yardopts file instead
-  # t.options = gemspec.rdoc_options
-  t.options += ['--output-dir', ENV['DOCS_DIR']] if ENV['DOCS_DIR']
+begin
+  require 'yard'
+  YARD::Rake::YardocTask.new do |t|
+    # use .yardopts file instead
+    # t.options = gemspec.rdoc_options
+    t.options += ['--output-dir', ENV['DOCS_DIR']] if ENV['DOCS_DIR']
+  end
+rescue LoadError => e
+  task(:yard) { raise e }
 end
 
 require 'rake/extensiontask'
