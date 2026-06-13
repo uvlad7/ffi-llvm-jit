@@ -158,7 +158,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rbenv/ruby-build
-          path: /tmp/ruby-build
+          path: tmp/ruby-build
 
       - if: contains(matrix.os, 'riscv')
         name: Build Ruby (riscv64)
@@ -166,7 +166,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             autoconf bison patch build-essential libssl-dev libyaml-dev \
             libreadline-dev zlib1g-dev libgmp-dev libffi-dev
-          sudo /tmp/ruby-build/install.sh
+          sudo ./tmp/ruby-build/install.sh
           RUBY_EXACT=$(ruby-build --definitions | grep -E "^${RUBY_VERSION}\." | sort -V | tail -1)
           echo "RUBY_EXACT=${RUBY_EXACT}"
           [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition found for Ruby ${RUBY_VERSION}"; exit 1; }
