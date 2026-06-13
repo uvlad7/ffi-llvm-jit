@@ -119,18 +119,13 @@ jobs:
           #   gemfile: ''
           #   default_clang: true
           # https://github.com/riseproject-dev/riscv-runner
+          # apt.llvm.org has no riscv64 packages; ruby/setup-ruby has no riscv64 prebuilts so we use ruby-build
           - os: ubuntu-24.04-riscv
             gemfile: ''
             default_clang: false
           - os: ubuntu-24.04-riscv
-            gemfile: 'llvm_21_1_0'
-            default_clang: false
-          - os: ubuntu-24.04-riscv
             gemfile: 'ruby_3_4'
             default_clang: false
-          - os: ubuntu-24.04-riscv
-            gemfile: 'llvm_21_1_0'
-            default_clang: true
 
     steps:
       - uses: actions/checkout@v4
@@ -159,6 +154,25 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
 
+      - if: contains(matrix.os, 'riscv')
+        uses: actions/checkout@v4
+        with:
+          repository: rbenv/ruby-build
+          path: /tmp/ruby-build
+
+      - if: contains(matrix.os, 'riscv')
+        name: Build Ruby (riscv64)
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            autoconf bison patch build-essential libssl-dev libyaml-dev \
+            libreadline-dev zlib1g-dev libgmp-dev libffi-dev
+          sudo /tmp/ruby-build/install.sh
+          RUBY_EXACT=$(ruby-build --definitions | grep -E "^${RUBY_VERSION}\." | sort -V | tail -1)
+          echo "RUBY_EXACT=${RUBY_EXACT}"
+          [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition found for Ruby ${RUBY_VERSION}"; exit 1; }
+          ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
+          touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
+
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -166,3 +180,55 @@ jobs:
           cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
 
       - run: bundle exec rake
+
+  musl:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    container: alpine:3.21
+    env:
+      BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
+    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on alpine-3.21
+    strategy:
+      fail-fast: false
+      matrix:
+        gemfile: ['', 'llvm_21_1_0', 'ruby_3_4']
+    steps:
+      - name: Bootstrap
+        shell: sh
+        run: apk add --no-cache bash git nodejs build-base
+      - name: Set versions
+        run: |
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/llvm_([0-9]+).*/\1/p')
+          echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
+          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
+          echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - name: Install LLVM
+        run: apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - run: bundle exec rake
+
+  freebsd:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    name: Ruby on freebsd-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64, riscv64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cross-platform-actions/action@v1.2.0
+        with:
+          operating_system: freebsd
+          architecture: ${{ matrix.arch }}
+          version: '14.4'
+          run: |
+            sudo pkg install -y llvm18 ruby33 ruby33-gems
+            export LLVM_CONFIG=llvm-config18
+            gem install bundler --no-document
+            bundle install
+            bundle exec rake
