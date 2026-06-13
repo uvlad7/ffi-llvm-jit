@@ -515,7 +515,7 @@ module FFI
 
       def link_external_global(mod, name)
         unless mod.globals[name]
-          glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name]), nil), name)
+          glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name])), name)
           glob.linkage = :external
         end
         mod.globals[name]
