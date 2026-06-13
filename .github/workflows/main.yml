@@ -38,11 +38,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-18-dev clang-18
 
       - if: runner.os == 'macOS'
-        run: |
-          brew update && brew install llvm@18
-          LLVM_PREFIX=$(brew --prefix llvm@18)
-          echo "LLVM_CONFIG=${LLVM_PREFIX}/bin/llvm-config" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${LLVM_PREFIX}/lib" >> "$GITHUB_ENV"
+        run: brew update && brew install llvm@18 && brew link llvm@18 --force
 
       # - if: runner.os == 'Windows'
       #   shell: cmd
@@ -148,11 +144,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
       - if: runner.os == 'macOS'
-        run: |
-          brew update && brew install "llvm@${LLVM_MAJOR_VERSION}"
-          LLVM_PREFIX=$(brew --prefix "llvm@${LLVM_MAJOR_VERSION}")
-          echo "LLVM_CONFIG=${LLVM_PREFIX}/bin/llvm-config" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${LLVM_PREFIX}/lib" >> "$GITHUB_ENV"
+        run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
 
       - uses: ruby/setup-ruby@v1
         with:

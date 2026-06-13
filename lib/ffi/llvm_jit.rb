@@ -27,7 +27,7 @@ module FFI
       LLVM_MOD = LLVM::Module.parse_bitcode(
         File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
-      puts LLVM_MOD.to_s[/producer: "[^"]+"/]
+      # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
 
       # Register FFI converter addresses with LLVM's global symbol table
