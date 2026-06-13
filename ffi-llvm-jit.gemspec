@@ -37,7 +37,8 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
   spec.extensions = ['ext/llvm_bitcode/extconf.rb', 'ext/ffi_llvm_jit/extconf.rb']
 
-  spec.add_dependency 'ffi', '~> 1.15'
+  # sed -i 's/ffi (~> 1.16)/ffi (~> 1.16, >= 1.16.3)/' gemfiles/Gemfile-*.lock
+  spec.add_dependency 'ffi', '~> 1.16', '>= 1.16.3'
   spec.add_dependency 'ruby-llvm', '>= 17.0.0', '<= 21.1.0'
 
   spec.requirements.push('llvm-17-dev or newer')

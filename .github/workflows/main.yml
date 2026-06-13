@@ -74,7 +74,6 @@ jobs:
           - llvm_18_2_0
           - llvm_20_1_7
           - llvm_21_1_0
-          - ffi_1_15_5
           - ffi_1_16_3
 
     steps:
