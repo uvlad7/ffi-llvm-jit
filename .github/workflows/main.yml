@@ -25,6 +25,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set versions
+        run: |
+          if [ '${{ matrix.default_clang }}' = 'true' ]; then
+            echo "CLANG=clang" >> "$GITHUB_ENV"
+            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-18-dev clang-18
+
+      - if: runner.os == 'macOS'
+        run: |
+          brew update && brew install llvm@18
+          LLVM_PREFIX=$(brew --prefix llvm@18)
+          echo "LLVM_CONFIG=${LLVM_PREFIX}/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${LLVM_PREFIX}/lib" >> "$GITHUB_ENV"
+
       # - if: runner.os == 'Windows'
       #   shell: cmd
       #   run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
