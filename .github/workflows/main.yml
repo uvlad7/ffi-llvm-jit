@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
       # BUNDLE_GEMFILE: "${{ runner.os == 'Windows' && 'gemfiles/Gemfile-win' || 'Gemfile' }}"
-    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.llvm_config && ' , llvm-config override' || '' }}
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.default_clang && 'default clang' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -25,18 +25,19 @@ jobs:
         include:
           - os: ubuntu-latest
             ruby: '3.3'
-            llvm_config: true
+            default_clang: true
           - os: ubuntu-24.04-arm
             ruby: '3.3'
-            llvm_config: true
+            default_clang: true
 
     steps:
       - uses: actions/checkout@v4
       - if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17
-          if [ -n '${{ matrix.llvm_config }}' ]; then
-            echo "LLVM_CONFIG=llvm-config-${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17 clang
+          if [ -n '${{ matrix.default_clang }}' ]; then
+            echo "CLANG=clang" >> "$GITHUB_ENV"
+            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
           fi
       - if: runner.os == 'macOS'
         run: brew update && brew install llvm@17 && brew link llvm@17 --force
@@ -47,6 +48,7 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
+          cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
           rubygems: 3.6.9
       - run: bundle exec rake
 
@@ -56,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       BUNDLE_GEMFILE: gemfiles/Gemfile-${{ matrix.gemfile }}
-    name: Ruby with ${{ matrix.gemfile }} on ${{ matrix.os }}${{ matrix.llvm_config && ' , llvm-config override' || '' }}
+    name: Ruby with ${{ matrix.gemfile }} on ${{ matrix.os }}${{ matrix.default_clang && 'default clang' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -90,22 +92,22 @@ jobs:
         include:
           - os: ubuntu-latest
             gemfile: llvm_18_2_0
-            llvm_config: true
+            default_clang: true
           - os: ubuntu-latest
             gemfile: llvm_20_1_7
-            llvm_config: true
+            default_clang: true
           - os: ubuntu-latest
             gemfile: llvm_21_1_0
-            llvm_config: true
+            default_clang: true
           - os: ubuntu-24.04-arm
             gemfile: llvm_18_2_0
-            llvm_config: true
+            default_clang: true
           - os: ubuntu-24.04-arm
             gemfile: llvm_20_1_7
-            llvm_config: true
+            default_clang: true
           - os: ubuntu-24.04-arm
             gemfile: llvm_21_1_0
-            llvm_config: true
+            default_clang: true
 
     steps:
       - uses: actions/checkout@v4
@@ -126,9 +128,10 @@ jobs:
               sudo tee /etc/apt/sources.list.d/llvm.list
           fi
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
-          if [ -n '${{ matrix.llvm_config }}' ]; then
-            echo "LLVM_CONFIG=llvm-config-${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}" clang
+          if [ -n '${{ matrix.default_clang }}' ]; then
+            echo "CLANG=clang" >> "$GITHUB_ENV"
+            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
           fi
       - if: runner.os == 'macOS'
         # In macOS we change the default clang, but on Ubuntu it's still available, that's why we test two options
@@ -138,5 +141,6 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+          cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
 
       - run: bundle exec rake

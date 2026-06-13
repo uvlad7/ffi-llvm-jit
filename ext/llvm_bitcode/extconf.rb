@@ -2,10 +2,23 @@
 
 require 'mkmf'
 
-llvm_config = ENV['LLVM_CONFIG'] || 'llvm-config'
-llvm_bindir = `#{llvm_config} --bindir`.strip
-clang = with_config('clang-path', File.join(llvm_bindir, 'clang'))
-clangxx = with_config('clangxx-path', File.join(llvm_bindir, 'clang++'))
+require 'llvm'
+
+llvm_bindir = [
+  with_config('llvm-config-path', ENV.fetch('LLVM_CONFIG', nil)),
+  "llvm-config-#{LLVM::LLVM_VERSION}",
+  'llvm-config',
+].find do |llvm_config|
+  next unless llvm_config
+
+  begin
+    break `#{llvm_config} --bindir`.strip
+  rescue Errno::ENOENT
+    next
+  end
+end
+clang = with_config('clang-path', ENV.fetch('CLANG', File.join(*llvm_bindir, 'clang')))
+clangxx = with_config('clangxx-path', ENV.fetch('CLANGXX', File.join(*llvm_bindir, 'clang++')))
 RbConfig::MAKEFILE_CONFIG['CC'] = RbConfig::CONFIG['CC'] = clang
 RbConfig::MAKEFILE_CONFIG['CXX'] = RbConfig::CONFIG['CXX'] = clangxx
 RbConfig::MAKEFILE_CONFIG['LDSHARED'] =
