@@ -40,7 +40,7 @@ Gem::Specification.new do |spec|
 
   # sed -i 's/ffi (~> 1.16)/ffi (~> 1.16, >= 1.16.3)/' gemfiles/Gemfile-*.lock
   spec.add_dependency 'ffi', '~> 1.16', '>= 1.16.3'
-  spec.add_dependency 'ruby-llvm', '>= 17.0.0', '<= 21.1.0'
+  spec.add_dependency 'ruby-llvm', '>= 17.0.0', '< 22'
 
   spec.requirements.push('llvm-17-dev or newer')
   # For more information and examples about making a new gem, check out our

@@ -3,7 +3,7 @@ PATH
   specs:
     ffi-llvm-jit (0.2.0)
       ffi (~> 1.16, >= 1.16.3)
-      ruby-llvm (>= 17.0.0, <= 21.1.0)
+      ruby-llvm (>= 17.0.0, < 22)
 
 GEM
   remote: https://rubygems.org/
