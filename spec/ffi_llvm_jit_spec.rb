@@ -329,6 +329,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   it 'supports mapped values' do
     mapper = Class.new do
       extend FFI::DataConverter
+
       native_type FFI::Type::INT
 
       def self.to_native(value, _context)
@@ -347,6 +348,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   it 'supports stacked mapped values' do
     mapper1 = Class.new do
       extend FFI::DataConverter
+
       native_type FFI::Type::INT
 
       def self.to_native(value, _context)
@@ -360,6 +362,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
     mapper2 = Class.new do
       extend FFI::DataConverter
+
       native_type mapper1
 
       def self.to_native(value, _context)

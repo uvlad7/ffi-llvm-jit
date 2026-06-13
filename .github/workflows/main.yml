@@ -38,12 +38,13 @@ jobs:
           rubygems: 3.6.9
       - run: bundle exec rake
 
+# gh workflow run main.yml --repo uvlad7/ffi-llvm-jit --ref main
   full:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     env:
       BUNDLE_GEMFILE: gemfiles/Gemfile-${{ matrix.gemfile }}
-    name: Ruby ${{ matrix.ruby }}, ${{ matrix.gemfile }} on ${{ matrix.os }}
+    name: Ruby ${{ matrix.gemfile }} on ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -88,10 +89,12 @@ jobs:
 
       - if: runner.os == 'Linux'
         run: |
-          wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
-            sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg] http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc)-${LLVM_MAJOR_VERSION} main" | \
-            sudo tee /etc/apt/sources.list.d/llvm.list
+          if [ "${LLVM_MAJOR_VERSION}" -ge 18 ]; then
+            wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
+              sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg
+            echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg] http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc)-${LLVM_MAJOR_VERSION} main" | \
+              sudo tee /etc/apt/sources.list.d/llvm.list
+          fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
       - if: runner.os == 'macOS'
