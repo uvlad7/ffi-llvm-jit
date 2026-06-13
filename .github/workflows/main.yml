@@ -179,6 +179,10 @@ jobs:
           bundler-cache: true
           cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
 
+      - name: Debug session
+        if: contains(matrix.os, 'riscv')
+        uses: mxschmitt/action-tmate@v3
+
       - run: bundle exec rake spec
 
   musl:
