@@ -15,16 +15,19 @@ gemspec path: File.basename(__dir__) == 'gemfiles' ? '..' : '.'
 gem 'ffi', ffi_version if ffi_version
 gem 'ruby-llvm', llvm_version
 
-gem 'pry', '0.14.2'
-gem 'pry-byebug', '3.10.1'
-
-gem 'benchmark-ips', '~> 2.14'
-gem 'strlen', '~> 1.0'
-
 gem 'ffi-compiler', '~> 1.3'
 
 gem 'rake', '~> 13.0'
 gem 'rake-compiler'
 gem 'rspec', '~> 3.0'
-gem 'rubocop', '~> 1.21'
-gem 'yard', '~> 0.9.37'
+
+group :development do
+  gem 'pry', '0.14.2'
+  gem 'pry-byebug', '3.10.1'
+
+  gem 'benchmark-ips', '~> 2.14'
+  gem 'strlen', '~> 1.0'
+
+  gem 'rubocop', '~> 1.21'
+  gem 'yard', '~> 0.9.37'
+end

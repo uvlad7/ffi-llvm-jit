@@ -57,6 +57,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
+      BUNDLE_WITHOUT: development
     name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
     strategy:
       fail-fast: false
@@ -155,12 +156,20 @@ jobs:
         run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
 
       - if: contains(matrix.os, 'riscv')
+        name: Restore Ruby cache (riscv64)
+        id: ruby-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ env.RUBY_VERSION }}
+
+      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: rbenv/ruby-build
           path: tmp/ruby-build
 
-      - if: contains(matrix.os, 'riscv')
+      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
         name: Build Ruby (riscv64)
         run: |
           sudo apt-get install -y --no-install-recommends \
@@ -172,6 +181,13 @@ jobs:
           [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition found for Ruby ${RUBY_VERSION}"; exit 1; }
           ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
           touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
+
+      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Save Ruby cache (riscv64)
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ env.RUBY_VERSION }}
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -204,7 +220,7 @@ jobs:
     steps:
       - name: Bootstrap
         shell: sh
-        run: apk add --no-cache ruby ruby-dev ruby-bundler
+        run: apk add --no-cache ruby ruby-dev ruby-bundler build-base
       - name: Set versions
         run: |
           LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
@@ -213,7 +229,10 @@ jobs:
       - name: Install LLVM
         run: apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
       - name: Install gems
-        run: bundle config set --local frozen true && bundle install
+        run: |
+          bundle config set --local without development
+          bundle config set --local frozen true
+          bundle install
       - run: bundle exec rake spec
 
   freebsd:
@@ -223,20 +242,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64, riscv64]
+        include:
+          - {arch: x86_64}
+          - {arch: aarch64}
+          - {arch: riscv64, sync: scp}
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/freebsd-vm@v1
         with:
           release: '14.4'
           arch: ${{ matrix.arch }}
+          sync: ${{ matrix.sync || 'rsync' }}
           usesh: true
           prepare: |
             pkg update
             pkg install -y llvm18 ruby33
           run: |
             export LLVM_CONFIG=llvm-config18
-            gem install bundler --no-document
+            gem33 install bundler --no-document
+            bundle config set --local without development
             bundle config set --local frozen true
             bundle install
             bundle exec rake spec
