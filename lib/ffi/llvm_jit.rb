@@ -27,6 +27,7 @@ module FFI
       LLVM_MOD = LLVM::Module.parse_bitcode(
         File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
+      # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
 
       # Register FFI converter addresses with LLVM's global symbol table
@@ -62,9 +63,14 @@ module FFI
       # see @LLVMinst inttoptr
       INTPTR = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = INTPTR
-      VOID_PTR_T = LLVM.Pointer() # Opaque pointer I guess
-      BLOCKING_CALL_T = LLVM_MOD.types['struct.ffi_llvm_jit_blocking_call_t']
-      raise 'BLOCKING_CALL_T not found' unless BLOCKING_CALL_T
+      VOID_PTR_T = LLVM.Pointer(LLVM::Void()) # Opaque pointer I guess
+      # Modern LLVM doesn't persist the type
+      BLOCKING_CALL_T = LLVM_MOD.types[
+        'struct.ffi_llvm_jit_blocking_call_t',
+        ] || LLVM::Struct(
+          LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
+          VOID_PTR_T,
+        )
 
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'

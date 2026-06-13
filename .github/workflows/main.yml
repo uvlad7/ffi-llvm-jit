@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
       # BUNDLE_GEMFILE: "${{ runner.os == 'Windows' && 'gemfiles/Gemfile-win' || 'Gemfile' }}"
-    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.llvm_config && ' , llvm-config override' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -22,10 +22,22 @@ jobs:
           - ubuntu-latest
         ruby:
           - '3.3'
+        include:
+          - os: ubuntu-latest
+            ruby: '3.3'
+            llvm_config: true
+          - os: ubuntu-24.04-arm
+            ruby: '3.3'
+            llvm_config: true
+
     steps:
       - uses: actions/checkout@v4
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17
+          if [ -n '${{ matrix.llvm_config }}' ]; then
+            echo "LLVM_CONFIG=llvm-config-${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
+          fi
       - if: runner.os == 'macOS'
         run: brew update && brew install llvm@17 && brew link llvm@17 --force
       # - if: runner.os == 'Windows'
@@ -44,12 +56,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       BUNDLE_GEMFILE: gemfiles/Gemfile-${{ matrix.gemfile }}
-    name: Ruby ${{ matrix.gemfile }} on ${{ matrix.os }}
+    name: Ruby with ${{ matrix.gemfile }} on ${{ matrix.os }}${{ matrix.llvm_config && ' , llvm-config override' || '' }}
     strategy:
       fail-fast: false
       matrix:
         os:
-          - macos-13          # x86_64
+          - macos-15-intel    # x86_64
           - macos-latest      # arm64
           - ubuntu-latest     # x86_64
           - ubuntu-24.04-arm  # arm64
@@ -75,6 +87,25 @@ jobs:
           - llvm_20_1_7
           - llvm_21_1_0
           - ffi_1_16_3
+        include:
+          - os: ubuntu-latest
+            gemfile: llvm_18_2_0
+            llvm_config: true
+          - os: ubuntu-latest
+            gemfile: llvm_20_1_7
+            llvm_config: true
+          - os: ubuntu-latest
+            gemfile: llvm_21_1_0
+            llvm_config: true
+          - os: ubuntu-24.04-arm
+            gemfile: llvm_18_2_0
+            llvm_config: true
+          - os: ubuntu-24.04-arm
+            gemfile: llvm_20_1_7
+            llvm_config: true
+          - os: ubuntu-24.04-arm
+            gemfile: llvm_21_1_0
+            llvm_config: true
 
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +127,11 @@ jobs:
           fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
+          if [ -n '${{ matrix.llvm_config }}' ]; then
+            echo "LLVM_CONFIG=llvm-config-${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
+          fi
       - if: runner.os == 'macOS'
+        # In macOS we change the default clang, but on Ubuntu it's still available, that's why we test two options
         run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
 
       - uses: ruby/setup-ruby@v1

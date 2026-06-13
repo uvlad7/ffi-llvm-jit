@@ -2,8 +2,12 @@
 
 require 'mkmf'
 
-RbConfig::MAKEFILE_CONFIG['CC'] = RbConfig::CONFIG['CC'] = 'clang'
-RbConfig::MAKEFILE_CONFIG['CXX'] = RbConfig::CONFIG['CXX'] = 'clang++'
+llvm_config = ENV['LLVM_CONFIG'] || 'llvm-config'
+llvm_bindir = `#{llvm_config} --bindir`.strip
+clang = with_config('clang-path', File.join(llvm_bindir, 'clang'))
+clangxx = with_config('clangxx-path', File.join(llvm_bindir, 'clang++'))
+RbConfig::MAKEFILE_CONFIG['CC'] = RbConfig::CONFIG['CC'] = clang
+RbConfig::MAKEFILE_CONFIG['CXX'] = RbConfig::CONFIG['CXX'] = clangxx
 RbConfig::MAKEFILE_CONFIG['LDSHARED'] =
   RbConfig::CONFIG['LDSHARED'] = "ruby -rfileutils -e 'FileUtils.cp(ARGV[2], ARGV[1])' -- "
 # RbConfig::MAKEFILE_CONFIG['MKMF_VERBOSE'] = RbConfig::CONFIG['MKMF_VERBOSE'] = '1'
