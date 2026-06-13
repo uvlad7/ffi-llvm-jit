@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
       # BUNDLE_GEMFILE: "${{ runner.os == 'Windows' && 'gemfiles/Gemfile-win' || 'Gemfile' }}"
-    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.default_clang && 'default clang' || '' }}
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -22,11 +22,9 @@ jobs:
           - ubuntu-latest
         ruby:
           - '3.3'
+        default_clang: [false]
         include:
           - os: ubuntu-latest
-            ruby: '3.3'
-            default_clang: true
-          - os: ubuntu-24.04-arm
             ruby: '3.3'
             default_clang: true
 
@@ -57,8 +55,8 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     env:
-      BUNDLE_GEMFILE: gemfiles/Gemfile-${{ matrix.gemfile }}
-    name: Ruby with ${{ matrix.gemfile }} on ${{ matrix.os }}${{ matrix.default_clang && 'default clang' || '' }}
+      BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
+    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +87,7 @@ jobs:
           - llvm_20_1_7
           - llvm_21_1_0
           - ffi_1_16_3
+        default_clang: [false]
         include:
           - os: ubuntu-latest
             gemfile: llvm_18_2_0
@@ -107,6 +106,15 @@ jobs:
             default_clang: true
           - os: ubuntu-24.04-arm
             gemfile: llvm_21_1_0
+            default_clang: true
+          - os: macos-15-intel
+            gemfile: ''
+            default_clang: false
+          - os: ubuntu-24.04-arm
+            gemfile: ''
+            default_clang: false
+          - os: ubuntu-24.04-arm
+            gemfile: ''
             default_clang: true
 
     steps:
