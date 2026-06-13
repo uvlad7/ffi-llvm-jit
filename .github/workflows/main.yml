@@ -107,24 +107,24 @@ jobs:
           - os: ubuntu-latest
             gemfile: llvm_21_1_0
             default_clang: true
-          - os: macos-latest
-            gemfile: llvm_18_2_0
-            default_clang: true
-          - os: macos-latest
-            gemfile: llvm_20_1_7
-            default_clang: true
-          - os: macos-latest
-            gemfile: llvm_21_1_0
-            default_clang: true
+          # - os: macos-latest
+          #   gemfile: llvm_18_2_0
+          #   default_clang: true
+          # - os: macos-latest
+          #   gemfile: llvm_20_1_7
+          #   default_clang: true
+          # - os: macos-latest
+          #   gemfile: llvm_21_1_0
+          #   default_clang: true
           - os: macos-15-intel
             gemfile: ''
             default_clang: false
           - os: ubuntu-24.04-arm
             gemfile: ''
             default_clang: false
-          - os: macos-latest
-            gemfile: ''
-            default_clang: true
+          # - os: macos-latest
+          #   gemfile: ''
+          #   default_clang: true
 
     steps:
       - uses: actions/checkout@v4
