@@ -75,7 +75,7 @@ GEM
     rubocop-ast (1.49.1)
       parser (>= 3.3.7.2)
       prism (~> 1.7)
-    ruby-llvm (17.0.0)
+    ruby-llvm (18.2.0)
       ffi (~> 1.13)
       rake (>= 12, < 14)
     ruby-progressbar (1.13.0)
@@ -108,7 +108,7 @@ DEPENDENCIES
   rake-compiler
   rspec (~> 3.0)
   rubocop (~> 1.21)
-  ruby-llvm (~> 17)
+  ruby-llvm (~> 18)
   strlen (~> 1.0)
   yard (~> 0.9.37)
 

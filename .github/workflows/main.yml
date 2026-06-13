@@ -22,32 +22,9 @@ jobs:
           - ubuntu-latest
         ruby:
           - '3.3'
-        default_clang: [false]
-        include:
-          - os: ubuntu-latest
-            ruby: '3.3'
-            default_clang: true
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set versions
-        run: |
-          if [ '${{ matrix.default_clang }}' = 'true' ]; then
-            echo "CLANG=clang" >> "$GITHUB_ENV"
-            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
-          fi
-
-      - if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-17-dev clang-17
-
-      - if: runner.os == 'macOS'
-        run: |
-          brew update && brew install llvm@17
-          LLVM_PREFIX=$(brew --prefix llvm@17)
-          echo "LLVM_CONFIG=${LLVM_PREFIX}/bin/llvm-config" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${LLVM_PREFIX}/lib" >> "$GITHUB_ENV"
       # - if: runner.os == 'Windows'
       #   shell: cmd
       #   run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
@@ -82,6 +59,7 @@ jobs:
         # LLVM:
         #  14.0.0  oldest supported
         #  15.0.4  opaque pointer transition era
+        #  17.0.0  major API churn
         #  18.2.0  mature modern LLVM
         #  20.1.7  current stable generation
         #  21.1.0  newest generation
@@ -92,14 +70,14 @@ jobs:
           - ruby_4_0
           # - llvm_14_0_0
           # - llvm_15_0_4
-          - llvm_18_2_0
+          - llvm_17_0_0
           - llvm_20_1_7
           - llvm_21_1_0
           - ffi_1_16_3
         default_clang: [false]
         include:
           - os: ubuntu-latest
-            gemfile: llvm_18_2_0
+            gemfile: llvm_17_0_0
             default_clang: true
           - os: ubuntu-latest
             gemfile: llvm_20_1_7
@@ -108,7 +86,7 @@ jobs:
             gemfile: llvm_21_1_0
             default_clang: true
           # - os: macos-latest
-          #   gemfile: llvm_18_2_0
+          #   gemfile: llvm_17_0_0
           #   default_clang: true
           # - os: macos-latest
           #   gemfile: llvm_20_1_7
@@ -132,7 +110,7 @@ jobs:
       - name: Set versions
         run: |
           LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/llvm_([0-9]+).*/\1/p')
-          echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
+          echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
           RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
           echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
           if [ '${{ matrix.default_clang }}' = 'true' ]; then
