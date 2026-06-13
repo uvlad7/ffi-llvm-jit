@@ -118,6 +118,19 @@ jobs:
           # - os: macos-latest
           #   gemfile: ''
           #   default_clang: true
+          # https://github.com/riseproject-dev/riscv-runner
+          - os: ubuntu-24.04-riscv
+            gemfile: ''
+            default_clang: false
+          - os: ubuntu-24.04-riscv
+            gemfile: 'llvm_21_1_0'
+            default_clang: false
+          - os: ubuntu-24.04-riscv
+            gemfile: 'ruby_3_4'
+            default_clang: false
+          - os: ubuntu-24.04-riscv
+            gemfile: 'llvm_21_1_0'
+            default_clang: true
 
     steps:
       - uses: actions/checkout@v4
