@@ -132,9 +132,9 @@ jobs:
 
       - name: Set versions
         run: |
-          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/llvm_([0-9]+).*/\1/p')
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
-          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
+          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
           echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
           if [ '${{ matrix.default_clang }}' = 'true' ]; then
             echo "CLANG=clang" >> "$GITHUB_ENV"
@@ -179,7 +179,7 @@ jobs:
           bundler-cache: true
           cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
 
-      - run: bundle exec rake
+      - run: bundle exec rake spec
 
   musl:
     if: github.event_name != 'pull_request'
@@ -203,14 +203,14 @@ jobs:
         run: apk add --no-cache ruby ruby-dev ruby-bundler
       - name: Set versions
         run: |
-          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/llvm_([0-9]+).*/\1/p')
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Install LLVM
         run: apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
       - name: Install gems
         run: bundle config set --local frozen true && bundle install
-      - run: bundle exec rake
+      - run: bundle exec rake spec
 
   freebsd:
     if: github.event_name != 'pull_request'
@@ -229,10 +229,10 @@ jobs:
           usesh: true
           prepare: |
             pkg update
-            pkg install -y llvm18 ruby33 ruby33-gems
+            pkg install -y llvm18 ruby33
           run: |
             export LLVM_CONFIG=llvm-config18
             gem install bundler --no-document
             bundle config set --local frozen true
             bundle install
-            bundle exec rake
+            bundle exec rake spec
