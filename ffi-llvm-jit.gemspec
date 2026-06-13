@@ -17,7 +17,8 @@ Gem::Specification.new do |spec|
   spec.license = 'MIT'
   # because of ruby-llvm that requires ruby 2.7 since version 13.0.0
   spec.required_ruby_version = '>= 2.7'
-  spec.required_rubygems_version = '>= 3.2.3'
+  # Default for ruby 2.7
+  spec.required_rubygems_version = '>= 3.1.6'
 
   # spec.metadata['allowed_push_host'] = "https://rubygems.org"
 
