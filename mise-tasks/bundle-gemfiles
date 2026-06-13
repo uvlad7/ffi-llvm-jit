@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+#MISE description="Run bundle lock (or install) for all gemfiles"
+#USAGE flag "--install" help="Run bundle install instead of bundle lock"
+#USAGE arg "[bundler_args]..." help="Extra args passed to bundle"
+set -euo pipefail
+
+cmd="${usage_install:+install}"
+cmd="${cmd:-lock}"
+
+run_bundle() {
+  local gemfile="$1" ruby_version="$2"
+  echo "==> ${gemfile} (ruby ${ruby_version})"
+  mise exec "ruby@${ruby_version}" -- env BUNDLE_GEMFILE="${gemfile}" bundle "${cmd}" ${usage_bundler_args:-}
+}
+
+run_bundle Gemfile 3.3
+
+for gemfile in gemfiles/Gemfile-*; do
+  [[ "${gemfile}" == *.lock ]] && continue
+  [[ "${gemfile}" == *-win ]] && continue
+  name="${gemfile#gemfiles/Gemfile-}"
+  ruby_version=$(echo "${name}" | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
+  run_bundle "${gemfile}" "${ruby_version:-3.3}"
+done
+
+# mise tasks r bundle-gemfiles --install --update ffi

@@ -27,6 +27,7 @@ module FFI
       LLVM_MOD = LLVM::Module.parse_bitcode(
         File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
+      # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
 
       # Register FFI converter addresses with LLVM's global symbol table
@@ -62,9 +63,16 @@ module FFI
       # see @LLVMinst inttoptr
       INTPTR = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
       VALUE = INTPTR
-      VOID_PTR_T = LLVM.Pointer() # Opaque pointer I guess
-      BLOCKING_CALL_T = LLVM_MOD.types['struct.ffi_llvm_jit_blocking_call_t']
-      raise 'BLOCKING_CALL_T not found' unless BLOCKING_CALL_T
+      VOID_PTR_T = LLVM.Pointer(LLVM::Void()) # Opaque pointer I guess
+
+      # Modern LLVM doesn't persist the type
+      # from_type raises in v21 on null ptr so we need to check explicitly
+      blocking_call_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_blocking_call_t')
+      blocking_call_t = LLVM::Type.from_ptr(blocking_call_t_ptr) unless blocking_call_t_ptr.null?
+      BLOCKING_CALL_T = blocking_call_t || LLVM::Struct(
+        LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
+        VOID_PTR_T,
+      )
 
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
@@ -185,14 +193,12 @@ module FFI
 
       def find_function_handle(cname, arg_types)
         ffi_libraries.each do |lib|
-          begin
-            function_names(cname, arg_types).each do |fname|
-              fn = lib.find_function(fname)
-              return fn if fn
-            end
-          rescue LoadError
-            # Ignored
+          function_names(cname, arg_types).each do |fname|
+            fn = lib.find_function(fname)
+            return fn if fn
           end
+        rescue LoadError
+          # Ignored
         end
 
         raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name))
@@ -517,7 +523,7 @@ module FFI
 
       def link_external_global(mod, name)
         unless mod.globals[name]
-          glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name]), nil), name)
+          glob = mod.globals.add(LLVM::Type.from_ptr(LLVM::C.get_value_type(LLVM_MOD.globals[name])), name)
           glob.linkage = :external
         end
         mod.globals[name]

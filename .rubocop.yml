@@ -1,5 +1,5 @@
 AllCops:
-  TargetRubyVersion: 2.3
+  TargetRubyVersion: 2.7
   SuggestExtensions: false
   NewCops: enable
 
@@ -10,7 +10,7 @@ Style/StringLiteralsInInterpolation:
   EnforcedStyle: single_quotes
 
 Gemspec/DevelopmentDependencies:
-  EnforcedStyle: gemspec
+  EnforcedStyle: Gemfile
 
 Gemspec/RequireMFA:
   Enabled: false
