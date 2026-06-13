@@ -81,14 +81,14 @@ jobs:
 
       - name: Set versions
         run: |
-          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -n 's/llvm_\([0-9]\+\).*/\1/p')
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/llvm_([0-9]+).*/\1/p')
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-17}" >> "$GITHUB_ENV"
-          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -n 's/ruby_\([0-9]\+\(_[0-9]\+\)*\).*/\1/p' | tr '_' '.')
+          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
           echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
 
       - if: runner.os == 'Linux'
         run: |
-          if [ "${LLVM_MAJOR_VERSION}" -ge 18 ]; then
+          if [ "${LLVM_MAJOR_VERSION}" -ge 19 ]; then
             wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
               sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg
             echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg] http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc)-${LLVM_MAJOR_VERSION} main" | \
