@@ -185,14 +185,12 @@ module FFI
 
       def find_function_handle(cname, arg_types)
         ffi_libraries.each do |lib|
-          begin
-            function_names(cname, arg_types).each do |fname|
-              fn = lib.find_function(fname)
-              return fn if fn
-            end
-          rescue LoadError
-            # Ignored
+          function_names(cname, arg_types).each do |fname|
+            fn = lib.find_function(fname)
+            return fn if fn
           end
+        rescue LoadError
+          # Ignored
         end
 
         raise FFI::NotFoundError.new(cname.to_s, ffi_libraries.map(&:name))
