@@ -230,10 +230,10 @@ jobs:
           else
             apt-get update
             apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg git
-            wget -qO rubygems.tgz "https://rubygems.org/rubygems/rubygems-3.6.9.tgz"
-            tar xzf rubygems.tgz
-            ruby rubygems-3.6.9/setup.rb
-            rm -rf rubygems-3.6.9 rubygems.tgz
+            wget -qO /tmp/rubygems.tgz "https://rubygems.org/rubygems/rubygems-3.6.9.tgz"
+            tar xzf /tmp/rubygems.tgz -C /tmp
+            ruby /tmp/rubygems-3.6.9/setup.rb
+            rm -rf /tmp/rubygems-3.6.9 /tmp/rubygems.tgz
           fi
       - name: Set versions
         run: |
