@@ -122,7 +122,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
   it 'supports named enum typedefs as argument types' do
     jitlib.enum :spec_enum_flags, [:flag_x, :flag_y, 42, :flag_z]
-    jitlib.attach_llvm_jit_function(:spec_enum_typedef, :spec_enum, [:spec_enum_flags, :string], :int)
+    jitlib.attach_llvm_jit_function(:spec_enum_typedef, :spec_enum, %i[spec_enum_flags string], :int)
     expect(jitlib.spec_enum_typedef(:flag_x, nil)).to eq(0)
     expect(jitlib.spec_enum_typedef(:flag_y, nil)).to eq(42)
     expect(jitlib.spec_enum_typedef(:flag_z, nil)).to eq(43)

@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
       # BUNDLE_GEMFILE: "${{ runner.os == 'Windows' && 'gemfiles/Gemfile-win' || 'Gemfile' }}"
-    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
+    name: Ruby ${{ matrix.ruby }}, LLVM 18 on ${{ matrix.os }}${{ matrix.default_clang && ' (default clang)' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,7 +58,7 @@ jobs:
     env:
       BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
       BUNDLE_WITHOUT: development
-    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
+    name: ${{ matrix.label }} on ${{ matrix.os }}${{ matrix.default_clang && ' (default clang)' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +92,14 @@ jobs:
           - ffi_1_16_3
         default_clang: [false]
         include:
+          - {gemfile: ruby_2_7,    label: 'Ruby 2.7, LLVM 18'}
+          - {gemfile: ruby_3_2,    label: 'Ruby 3.2, LLVM 18'}
+          - {gemfile: ruby_3_4,    label: 'Ruby 3.4, LLVM 18'}
+          - {gemfile: ruby_4_0,    label: 'Ruby 4.0, LLVM 18'}
+          - {gemfile: llvm_17_0_0, label: 'Ruby 3.3, LLVM 17.0.0'}
+          - {gemfile: llvm_20_1_7, label: 'Ruby 3.3, LLVM 20.1.7'}
+          - {gemfile: llvm_21_1_0, label: 'Ruby 3.3, LLVM 21.1.0'}
+          - {gemfile: ffi_1_16_3,  label: 'Ruby 3.3, LLVM 18, FFI 1.16.3'}
           - os: ubuntu-latest
             gemfile: llvm_17_0_0
             default_clang: true
@@ -113,9 +121,11 @@ jobs:
           - os: macos-15-intel
             gemfile: ''
             default_clang: false
+            label: 'Ruby 3.3, LLVM 18'
           - os: ubuntu-24.04-arm
             gemfile: ''
             default_clang: false
+            label: 'Ruby 3.3, LLVM 18'
           # - os: macos-latest
           #   gemfile: ''
           #   default_clang: true
@@ -211,17 +221,17 @@ jobs:
     container: ${{ matrix.container }}
     env:
       BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
-    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.container }}
+    name: ${{ matrix.label }} on ${{ matrix.container }} container
     strategy:
       fail-fast: false
       matrix:
         include:
           # ruby/setup-ruby is incompatible with musl so we use apk ruby
           # alpine:3.21 has llvm18-19 and ruby3.3
-          - {gemfile: '', container: 'alpine:3.21', pkg: apk}
+          - {gemfile: '', container: 'alpine:3.21', pkg: apk, label: 'Ruby 3.3, LLVM 18'}
           # alpine:3.23 has llvm18-21 and ruby3.4
-          - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23', pkg: apk}
-          - {gemfile: 'ruby_3_1', container: 'i386/debian:12', pkg: apt}
+          - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23', pkg: apk, label: 'Ruby 3.4, LLVM 21.1.0'}
+          - {gemfile: 'ruby_3_1', container: 'i386/debian:12', pkg: apt, label: 'Ruby 3.1, LLVM 18'}
     steps:
       - name: Bootstrap
         run: |
@@ -268,7 +278,7 @@ jobs:
   freebsd:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    name: Ruby on freebsd-${{ matrix.arch }}
+    name: Ruby 3.3, LLVM 18 on freebsd14.4-${{ matrix.arch }} vmaction
     strategy:
       fail-fast: false
       matrix:
