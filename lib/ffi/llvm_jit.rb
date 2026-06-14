@@ -40,7 +40,26 @@ module FFI
         ).find_function('rbffi_save_errno'),
       )
 
+      p [
+        RbConfig::CONFIG['host_cpu'],
+        RbConfig::CONFIG['target_cpu'],
+        LLVM_MOD.triple,
+        LLVM::C.get_default_target_triple,
+      ]
+
       LLVM.init_jit
+      begin
+        asm_parser = case RbConfig::CONFIG['host_cpu']
+                     when /x86_64|i\d86|amd64/ then :LLVMInitializeX86AsmParser
+                     when /arm64|aarch64/ then :LLVMInitializeAArch64AsmParser
+                     end
+        if asm_parser
+          LLVM::C.attach_function :llvm_initialize_native_asm_parser, asm_parser, [], :void
+          LLVM::C.llvm_initialize_native_asm_parser
+        end
+      rescue FFI::NotFoundError
+        # Target asm parser not available in this LLVM build
+      end
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
       LLVM_MUTEX = Mutex.new
 
@@ -101,7 +120,7 @@ module FFI
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
 
-      SUPPORTED_CPUS = %w[x86_64 arm64 aarch64 i386].freeze
+      SUPPORTED_CPUS = %w[x86_64 arm64 aarch64 i386 amd64].freeze
       SUPPORTED_OS = [/linux/, /darwin/].freeze
       private_constant :SUPPORTED_CPUS, :SUPPORTED_OS
 
