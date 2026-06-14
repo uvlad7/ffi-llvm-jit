@@ -103,12 +103,15 @@ jobs:
           - os: ubuntu-latest
             gemfile: llvm_17_0_0
             default_clang: true
+            label: 'Ruby 3.3, LLVM 17.0.0'
           - os: ubuntu-latest
             gemfile: llvm_20_1_7
             default_clang: true
+            label: 'Ruby 3.3, LLVM 20.1.7'
           - os: ubuntu-latest
             gemfile: llvm_21_1_0
             default_clang: true
+            label: 'Ruby 3.3, LLVM 21.1.0'
           # - os: macos-latest
           #   gemfile: llvm_17_0_0
           #   default_clang: true
