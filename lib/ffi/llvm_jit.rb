@@ -25,11 +25,21 @@ module FFI
     module Library # rubocop:disable Metrics/ModuleLength
       include ::FFI::Library
 
+      SUPPORTED_ARCHS = {
+        'x86_64' => :LLVMInitializeX86AsmParser,
+        'i386' => :LLVMInitializeX86AsmParser,
+        'aarch64' => :LLVMInitializeAArch64AsmParser,
+        'arm64' => :LLVMInitializeAArch64AsmParser,
+      }.freeze
+      SUPPORTED_OS = [/linux/, /darwin/, /freebsd/].freeze
+      private_constant :SUPPORTED_ARCHS, :SUPPORTED_OS
+
       LLVM_MOD = LLVM::Module.parse_bitcode(
         File.expand_path("llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
       # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
+      LLVM_TRIPLE = LLVM_MOD.triple.split('-', 3).freeze
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
@@ -59,7 +69,7 @@ module FFI
       end
       raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
 
-      private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX
+      private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX, :LLVM_TRIPLE
 
       # LLVM_ENG.dispose is never called
       # https://llvm.org/doxygen/group__LLVMCTarget.html#gaaa9ce583969eb8754512e70ec4b80061
@@ -107,16 +117,6 @@ module FFI
       }.freeze
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
-
-      LLVM_TRIPLE = LLVM_MOD.triple.split('-', 3).freeze
-      SUPPORTED_ARCHS = {
-        'x86_64'  => :LLVMInitializeX86AsmParser,
-        'i386'    => :LLVMInitializeX86AsmParser,
-        'aarch64' => :LLVMInitializeAArch64AsmParser,
-        'arm64'   => :LLVMInitializeAArch64AsmParser,
-      }.freeze
-      SUPPORTED_OS = [/linux/, /darwin/, /freebsd/].freeze
-      private_constant :LLVM_TRIPLE, :SUPPORTED_ARCHS, :SUPPORTED_OS
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
