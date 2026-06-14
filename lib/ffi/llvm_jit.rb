@@ -101,8 +101,9 @@ module FFI
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
 
-      SUPPORTED_CPUS = %w[x86_64 amd64 i386 i486 i586 i686 arm64 aarch64].freeze
-      private_constant :SUPPORTED_CPUS
+      SUPPORTED_CPUS = %w[x86_64].freeze
+      SUPPORTED_OS = [/linux/, /darwin/].freeze
+      private_constant :SUPPORTED_CPUS, :SUPPORTED_OS
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -236,7 +237,9 @@ module FFI
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
         cpu = RbConfig::CONFIG['host_cpu']
-        raise UnsupportedError, "MCJIT is not supported on #{cpu}" unless SUPPORTED_CPUS.include?(cpu)
+        os  = RbConfig::CONFIG['host_os']
+        raise UnsupportedError, "MCJIT is not supported on #{cpu}-#{os}" unless
+          SUPPORTED_CPUS.include?(cpu) && SUPPORTED_OS.any? { |r| os =~ r }
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
         unless unknown_options.empty?

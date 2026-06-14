@@ -230,10 +230,6 @@ jobs:
           else
             apt-get update
             apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg git
-            wget -qO /tmp/rubygems.tgz "https://rubygems.org/rubygems/rubygems-3.6.9.tgz"
-            tar xzf /tmp/rubygems.tgz -C /tmp
-            ruby /tmp/rubygems-3.6.9/setup.rb
-            rm -rf /tmp/rubygems-3.6.9 /tmp/rubygems.tgz
           fi
       - name: Set versions
         run: |
@@ -263,32 +259,34 @@ jobs:
       - name: Install gems
         run: |
           bundle config set --local without development
+          bundle config set --local force_ruby_platform true
           bundle config set --local frozen true
           bundle install
       - run: bundle exec rake spec
 
-  freebsd:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    name: Ruby on freebsd-${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: vmactions/freebsd-vm@v1
-        with:
-          release: '14.4'
-          arch: ${{ matrix.arch }}
-          usesh: true
-          prepare: |
-            pkg update
-            pkg install -y llvm18 ruby33
-            ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
-          run: |
-            export LLVM_CONFIG=llvm-config18
-            bundle config set --local without development
-            bundle config set --local frozen true
-            bundle install
-            bundle exec rake spec
+  # LLVM ERROR: Inline asm not supported by this streamer because we don't have an asm parser for this target
+  # freebsd:
+  #   if: github.event_name != 'pull_request'
+  #   runs-on: ubuntu-latest
+  #   name: Ruby on freebsd-${{ matrix.arch }}
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       arch: [x86_64, aarch64]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: vmactions/freebsd-vm@v1
+  #       with:
+  #         release: '14.4'
+  #         arch: ${{ matrix.arch }}
+  #         usesh: true
+  #         prepare: |
+  #           pkg update
+  #           pkg install -y llvm18 ruby33
+  #           ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
+  #         run: |
+  #           export LLVM_CONFIG=llvm-config18
+  #           bundle config set --local without development
+  #           bundle config set --local frozen true
+  #           bundle install
+  #           bundle exec rake spec
