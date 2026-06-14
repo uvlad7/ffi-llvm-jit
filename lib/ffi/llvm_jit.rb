@@ -32,6 +32,7 @@ module FFI
         'x86_64' => :LLVMInitializeX86AsmParser,
         'amd64' => :LLVMInitializeX86AsmParser,
         'i386' => :LLVMInitializeX86AsmParser,
+        'i686' => :LLVMInitializeX86AsmParser,
         'aarch64' => :LLVMInitializeAArch64AsmParser,
         'arm64' => :LLVMInitializeAArch64AsmParser,
       }.freeze
