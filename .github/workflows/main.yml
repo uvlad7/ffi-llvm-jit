@@ -121,12 +121,14 @@ jobs:
           #   default_clang: true
           # https://github.com/riseproject-dev/riscv-runner
           # apt.llvm.org has no riscv64 packages; ruby/setup-ruby has no riscv64 prebuilts so we use ruby-build
-          - os: ubuntu-24.04-riscv
-            gemfile: ''
-            default_clang: false
-          - os: ubuntu-24.04-riscv
-            gemfile: 'ruby_3_4'
-            default_clang: false
+
+          # MCJIT crashes in get_function_address - confirmed on hello.rb with ruby-llvm 18.2.0 and 19.1.6
+          # - os: ubuntu-24.04-riscv
+          #   gemfile: ''
+          #   default_clang: false
+          # - os: ubuntu-24.04-riscv
+          #   gemfile: 'ruby_3_4'
+          #   default_clang: false
 
     steps:
       - uses: actions/checkout@v4
@@ -196,13 +198,14 @@ jobs:
           bundler-cache: true
           cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
 
-      - name: Debug session
-        if: contains(matrix.os, 'riscv')
-        uses: mxschmitt/action-tmate@v3
+      # - name: Debug session
+      #   if: contains(matrix.os, 'arm')
+      #   uses: mxschmitt/action-tmate@v3
 
       - run: bundle exec rake spec
 
-  musl:
+  # musl and x86
+  docker:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
@@ -215,20 +218,31 @@ jobs:
         include:
           # ruby/setup-ruby is incompatible with musl so we use apk ruby
           # alpine:3.21 has llvm18-19 and ruby3.3
-          - {gemfile: '', container: 'alpine:3.21'}
+          - {gemfile: '', container: 'alpine:3.21', pkg: apk}
           # alpine:3.23 has llvm18-21 and ruby3.4
-          - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23'}
+          - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23', pkg: apk}
+          - {gemfile: '', container: 'i386/ubuntu:24.04', pkg: apt}
     steps:
       - name: Bootstrap
-        shell: sh
-        run: apk add --no-cache ruby ruby-dev ruby-bundler build-base
+        run: |
+          if [ '${{ matrix.pkg }}' = 'apk' ]; then
+            apk add --no-cache ruby ruby-dev ruby-bundler build-base
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential
+          fi
       - name: Set versions
         run: |
           LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Install LLVM
-        run: apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
+        run: |
+          if [ '${{ matrix.pkg }}' = 'apk' ]; then
+            apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
+          else
+            apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
+          fi
       - name: Install gems
         run: |
           bundle config set --local without development

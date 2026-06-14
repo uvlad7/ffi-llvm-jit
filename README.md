@@ -2,6 +2,8 @@
 
 Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. Works only on MRI, doesn't support Windows yet.
 
+MCJIT is supported on **x86_64**, **i686**, **arm64** (Apple Silicon), and **aarch64** (Linux ARM64). On other architectures, `attach_function` falls back to regular FFI silently, and `attach_llvm_jit_function` raises `FFI::LLVMJIT::UnsupportedError`.
+
 ## Requirements
 
 The gem depends on `ruby-llvm` gem, which requires `llvm` development package to be installed.

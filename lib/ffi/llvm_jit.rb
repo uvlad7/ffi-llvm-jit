@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'rbconfig'
 require 'set'
 
 require 'ffi'
@@ -99,6 +100,9 @@ module FFI
       }.freeze
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
+
+      SUPPORTED_CPUS = %w[x86_64 i686 arm64 aarch64].freeze
+      private_constant :SUPPORTED_CPUS
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -230,6 +234,9 @@ module FFI
 
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
+
+        cpu = RbConfig::CONFIG['host_cpu']
+        raise UnsupportedError, "MCJIT is not supported on #{cpu}" unless SUPPORTED_CPUS.include?(cpu)
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
         unless unknown_options.empty?
