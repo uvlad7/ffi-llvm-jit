@@ -229,13 +229,21 @@ jobs:
             apk add --no-cache ruby ruby-dev ruby-bundler build-base
           else
             apt-get update
-            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg
+            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg git
           fi
       - name: Set versions
         run: |
           LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
           echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - if: matrix.pkg == 'apk'
+        uses: actions/checkout@v4
+      - if: matrix.pkg == 'apt'
+        name: Checkout
+        run: |
+          git init .
+          git remote add origin 'https://github.com/${{ github.repository }}'
+          git fetch --depth 1 origin '${{ github.sha }}'
+          git checkout FETCH_HEAD
       - name: Install LLVM
         run: |
           if [ '${{ matrix.pkg }}' = 'apk' ]; then
@@ -271,11 +279,10 @@ jobs:
           usesh: true
           prepare: |
             pkg update
-            pkg install -y llvm18 ruby34 ruby34-gems
+            pkg install -y llvm18 ruby33
+            ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
           run: |
-            export BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_4
             export LLVM_CONFIG=llvm-config18
-            gem install bundler --no-document
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
