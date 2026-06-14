@@ -40,26 +40,14 @@ module FFI
         ).find_function('rbffi_save_errno'),
       )
 
-      p [
-        RbConfig::CONFIG['host_cpu'],
-        RbConfig::CONFIG['target_cpu'],
-        LLVM_MOD.triple,
-        LLVM::C.get_default_target_triple,
-      ]
-
       LLVM.init_jit
-      begin
-        asm_parser = case RbConfig::CONFIG['host_cpu']
-                     when /x86_64|i\d86|amd64/ then :LLVMInitializeX86AsmParser
-                     when /arm64|aarch64/ then :LLVMInitializeAArch64AsmParser
-                     end
-        if asm_parser
-          LLVM::C.attach_function :llvm_initialize_native_asm_parser, asm_parser, [], :void
-          LLVM::C.llvm_initialize_native_asm_parser
-        end
-      rescue FFI::NotFoundError
-        # Target asm parser not available in this LLVM build
+
+      asm_parser = SUPPORTED_ARCHS[LLVM_TRIPLE[0]]
+      if asm_parser
+        LLVM::C.attach_function :llvm_initialize_native_asm_parser, asm_parser, [], :void
+        LLVM::C.llvm_initialize_native_asm_parser
       end
+
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
       LLVM_MUTEX = Mutex.new
 
@@ -120,9 +108,15 @@ module FFI
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
 
-      SUPPORTED_CPUS = %w[x86_64 arm64 aarch64 i386 amd64].freeze
-      SUPPORTED_OS = [/linux/, /darwin/].freeze
-      private_constant :SUPPORTED_CPUS, :SUPPORTED_OS
+      LLVM_TRIPLE = LLVM_MOD.triple.split('-', 3).freeze
+      SUPPORTED_ARCHS = {
+        'x86_64'  => :LLVMInitializeX86AsmParser,
+        'i386'    => :LLVMInitializeX86AsmParser,
+        'aarch64' => :LLVMInitializeAArch64AsmParser,
+        'arm64'   => :LLVMInitializeAArch64AsmParser,
+      }.freeze
+      SUPPORTED_OS = [/linux/, /darwin/, /freebsd/].freeze
+      private_constant :LLVM_TRIPLE, :SUPPORTED_ARCHS, :SUPPORTED_OS
 
       # TODO: LLVM args
       # FFI::Type::Builtin to LLVM types
@@ -255,10 +249,8 @@ module FFI
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
-        cpu = RbConfig::CONFIG['host_cpu']
-        os  = RbConfig::CONFIG['host_os']
-        raise UnsupportedError, "MCJIT is not supported on #{cpu}-#{os}" unless
-          SUPPORTED_CPUS.include?(cpu) && SUPPORTED_OS.any? { |r| os =~ r }
+        raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless
+          SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
         unless unknown_options.empty?
