@@ -221,7 +221,7 @@ jobs:
           - {gemfile: '', container: 'alpine:3.21', pkg: apk}
           # alpine:3.23 has llvm18-21 and ruby3.4
           - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23', pkg: apk}
-          - {gemfile: '', container: 'i386/debian:12', pkg: apt}
+          - {gemfile: 'ruby_3_1', container: 'i386/debian:12', pkg: apt}
     steps:
       - name: Bootstrap
         run: |
@@ -240,6 +240,7 @@ jobs:
       - if: matrix.pkg == 'apt'
         name: Checkout
         run: |
+          git config --global --add safe.directory '*'
           git init .
           git remote add origin 'https://github.com/${{ github.repository }}'
           git fetch --depth 1 origin '${{ github.sha }}'

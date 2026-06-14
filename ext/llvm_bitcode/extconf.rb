@@ -22,7 +22,7 @@ clangxx = with_config('clangxx-path', ENV.fetch('CLANGXX', File.join(*llvm_bindi
 RbConfig::MAKEFILE_CONFIG['CC'] = RbConfig::CONFIG['CC'] = clang
 RbConfig::MAKEFILE_CONFIG['CXX'] = RbConfig::CONFIG['CXX'] = clangxx
 RbConfig::MAKEFILE_CONFIG['LDSHARED'] =
-  RbConfig::CONFIG['LDSHARED'] = "ruby -rfileutils -e 'FileUtils.cp(ARGV[2], ARGV[1])' -- "
+  RbConfig::CONFIG['LDSHARED'] = "#{RbConfig.ruby} -rfileutils -e 'FileUtils.cp(ARGV[2], ARGV[1])' -- "
 # RbConfig::MAKEFILE_CONFIG['MKMF_VERBOSE'] = RbConfig::CONFIG['MKMF_VERBOSE'] = '1'
 # cp into lib dir won't work; just use MAKEFILE_CONFIG later to find the extname
 # RbConfig::MAKEFILE_CONFIG['DLEXT'] = RbConfig::CONFIG['DLEXT'] = 'bc'
