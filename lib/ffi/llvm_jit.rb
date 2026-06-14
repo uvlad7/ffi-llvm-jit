@@ -19,7 +19,7 @@ module FFI
 
   # Ruby FFI JIT using LLVM
   module LLVMJIT
-    class UnsupportedError < RuntimeError; end
+    class UnsupportedError < NotImplementedError; end
 
     # Extension to FFI::Library to support JIT compilation using LLVM
     module Library # rubocop:disable Metrics/ModuleLength
