@@ -4,8 +4,15 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      extended:
+        description: 'Run VM and Docker jobs'
+        type: boolean
+        default: false
 
 jobs:
   simple:
@@ -219,7 +226,7 @@ jobs:
 
   # musl and x86
   docker:
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
     env:
@@ -278,8 +285,8 @@ jobs:
       - run: bundle exec rake spec
 
   # LLVM ERROR: Inline asm not supported by this streamer because we don't have an asm parser for this target
-  freebsd:
-    if: github.event_name != 'pull_request'
+  vmaction:
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
     name: Ruby 3.3, LLVM 18 on freebsd14.4-${{ matrix.arch }} vmaction
     strategy:
