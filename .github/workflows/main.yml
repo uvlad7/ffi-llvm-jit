@@ -230,6 +230,7 @@ jobs:
           else
             apt-get update
             apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg git
+            gem update --system 3.6.9
           fi
       - name: Set versions
         run: |
