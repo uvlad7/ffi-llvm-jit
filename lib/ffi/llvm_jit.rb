@@ -101,7 +101,7 @@ module FFI
 
       private_constant :INTPTR, :VALUE, :VOID_PTR_T, :BLOCKING_CALL_T, :LLVM_TYPES, :LLVM_STDCALL
 
-      SUPPORTED_CPUS = %w[x86_64].freeze
+      SUPPORTED_CPUS = %w[x86_64 arm64 aarch64 i386].freeze
       SUPPORTED_OS = [/linux/, /darwin/].freeze
       private_constant :SUPPORTED_CPUS, :SUPPORTED_OS
 
