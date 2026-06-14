@@ -49,7 +49,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       jitlib.attach_llvm_jit_function :qsort, [:pointer, :size_t, :size_t, cb], :void
     end.to raise_error(
       FFI::LLVMJIT::UnsupportedError,
-      'Unsupported argument type: #<FFI::Type::Builtin::POINTER size=8 alignment=8>',
+      "Unsupported argument type: #{FFI::Type::Builtin::POINTER.inspect}",
     )
     jitlib.attach_function :qsort, [:pointer, :size_t, :size_t, cb], :void
 
@@ -174,7 +174,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       jitlib.attach_llvm_jit_function :memset, %i[string void size_t], :void
     end.to raise_error(
       FFI::LLVMJIT::UnsupportedError,
-      'Unsupported argument type: #<FFI::Type::Builtin::VOID size=1 alignment=1>',
+      "Unsupported argument type: #{FFI::Type::Builtin::VOID.inspect}",
     )
     # Surprisignly, FFI allows that, but
     #   jitlib.memset("", nil, 0)
