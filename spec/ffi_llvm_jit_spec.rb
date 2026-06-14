@@ -89,7 +89,6 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'supports enums' do
-    # partial support - not as typedefs, for that dataconverter support is needed
     jitlib.enum [:a, :b, 2]
     jitlib.attach_llvm_jit_function(:spec_enum, %i[int string], :int)
     expect(jitlib.spec_enum(:a, nil)).to eq(0)
@@ -119,6 +118,14 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       includer.spec_enum_cust(:c, nil)
     end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
     expect(includer.spec_enum_cust(:v, nil)).to eq(42)
+  end
+
+  it 'supports named enum typedefs as argument types' do
+    jitlib.enum :spec_enum_flags, [:flag_x, :flag_y, 42, :flag_z]
+    jitlib.attach_llvm_jit_function(:spec_enum_typedef, :spec_enum, [:spec_enum_flags, :string], :int)
+    expect(jitlib.spec_enum_typedef(:flag_x, nil)).to eq(0)
+    expect(jitlib.spec_enum_typedef(:flag_y, nil)).to eq(42)
+    expect(jitlib.spec_enum_typedef(:flag_z, nil)).to eq(43)
   end
 
   it 'supports multiple args' do
