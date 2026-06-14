@@ -2,6 +2,8 @@
 
 Extends Ruby FFI and uses LLVM to generate JIT wrappers for attached native functions. Works only on MRI, doesn't support Windows yet.
 
+MCJIT is supported on **x86_64**, **i386**/**i686**, **arm64**/**aarch64** on Linux, macOS, and FreeBSD. On other architectures or operating systems, `attach_function` falls back to regular FFI silently, and `attach_llvm_jit_function` raises `FFI::LLVMJIT::UnsupportedError`.
+
 ## Requirements
 
 The gem depends on `ruby-llvm` gem, which requires `llvm` development package to be installed.
@@ -171,7 +173,7 @@ Comparison:
 
 After checking out the repo, run `bin/setup` to install dependencies.
 
-LLVM 17 is used for development. Install it via `apt install llvm17-dev`, or change the `ruby-llvm` version in [ffi-llvm-jit.gemspec](./ffi-llvm-jit.gemspec) to use a different version of LLVM.
+LLVM 18 is used for development. Install it via `apt install llvm18-dev`, or change the `ruby-llvm` version in [ffi-llvm-jit.gemspec](./ffi-llvm-jit.gemspec) to use a different version of LLVM.
 
 Then, run `bundle exec rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
 

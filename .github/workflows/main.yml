@@ -1,19 +1,20 @@
-name: Ruby
+name: CI
 
 on:
   push:
     branches:
       - main
-
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  build:
+  simple:
     runs-on: ${{ matrix.os }}
-    env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
-      BUNDLE_GEMFILE: "${{ matrix.os == 'windows-latest' && 'Gemfile-win' || 'Gemfile' }}"
-    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
+    # env: # $BUNDLE_GEMFILE must be set at the job level, so it is set for all steps
+      # BUNDLE_GEMFILE: "${{ runner.os == 'Windows' && 'gemfiles/Gemfile-win' || 'Gemfile' }}"
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
     strategy:
+      fail-fast: false
       matrix:
         os:
           # - windows-latest - unable to install ruby-llvm
@@ -24,18 +25,271 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - if: matrix.os == 'ubuntu-latest'
-        run: sudo apt update && sudo apt install -y --no-install-recommends llvm-17-dev
-      - if: matrix.os == 'macos-latest'
-        run: brew update && brew install llvm@17 && brew link llvm@17 --force
-      - if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+
+      - name: Set versions
+        run: |
+          if [ '${{ matrix.default_clang }}' = 'true' ]; then
+            echo "CLANG=clang" >> "$GITHUB_ENV"
+            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-18-dev clang-18
+
+      - if: runner.os == 'macOS'
+        run: brew update && brew install llvm@18 && brew link llvm@18 --force
+
+      # - if: runner.os == 'Windows'
+      #   shell: cmd
+      #   run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
+      - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby }} # Not needed with a .ruby-version, .tool-versions or mise.toml
+          ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
+          cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
           rubygems: 3.6.9
-      - name: Run the default task
-        run: bundle exec rake
+      - run: bundle exec rake
+
+# gh workflow run main.yml --repo uvlad7/ffi-llvm-jit --ref main
+  full:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    env:
+      BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
+      BUNDLE_WITHOUT: development
+    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.os }}${{ matrix.default_clang && ' default clang' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15-intel    # x86_64
+          - macos-latest      # arm64
+          - ubuntu-latest     # x86_64
+          - ubuntu-24.04-arm  # arm64
+        # Ruby:
+        #  2.7    oldest supported
+        #  3.2    mature Ruby 3 baseline
+        #  3.4    latest stable Ruby 3
+        #  4.0    future/next major
+        # LLVM:
+        #  14.0.0  oldest supported
+        #  15.0.4  opaque pointer transition era
+        #  17.0.0  major API churn
+        #  18.2.0  mature modern LLVM
+        #  20.1.7  current stable generation
+        #  21.1.0  newest generation
+        gemfile:
+          - ruby_2_7
+          - ruby_3_2
+          - ruby_3_4
+          - ruby_4_0
+          # - llvm_14_0_0
+          # - llvm_15_0_4
+          - llvm_17_0_0
+          - llvm_20_1_7
+          - llvm_21_1_0
+          - ffi_1_16_3
+        default_clang: [false]
+        include:
+          - os: ubuntu-latest
+            gemfile: llvm_17_0_0
+            default_clang: true
+          - os: ubuntu-latest
+            gemfile: llvm_20_1_7
+            default_clang: true
+          - os: ubuntu-latest
+            gemfile: llvm_21_1_0
+            default_clang: true
+          # - os: macos-latest
+          #   gemfile: llvm_17_0_0
+          #   default_clang: true
+          # - os: macos-latest
+          #   gemfile: llvm_20_1_7
+          #   default_clang: true
+          # - os: macos-latest
+          #   gemfile: llvm_21_1_0
+          #   default_clang: true
+          - os: macos-15-intel
+            gemfile: ''
+            default_clang: false
+          - os: ubuntu-24.04-arm
+            gemfile: ''
+            default_clang: false
+          # - os: macos-latest
+          #   gemfile: ''
+          #   default_clang: true
+          # https://github.com/riseproject-dev/riscv-runner
+          # apt.llvm.org has no riscv64 packages; ruby/setup-ruby has no riscv64 prebuilts so we use ruby-build
+
+          # MCJIT crashes in get_function_address - confirmed on hello.rb with ruby-llvm 18.2.0 and 19.1.6
+          # - os: ubuntu-24.04-riscv
+          #   gemfile: ''
+          #   default_clang: false
+          # - os: ubuntu-24.04-riscv
+          #   gemfile: 'ruby_3_4'
+          #   default_clang: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set versions
+        run: |
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
+          echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
+          RUBY_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
+          echo "RUBY_VERSION=${RUBY_VERSION:-3.3}" >> "$GITHUB_ENV"
+          if [ '${{ matrix.default_clang }}' = 'true' ]; then
+            echo "CLANG=clang" >> "$GITHUB_ENV"
+            echo "CLANGXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - if: runner.os == 'Linux'
+        run: |
+          if [ "${LLVM_MAJOR_VERSION}" -ge 19 ]; then
+            wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
+              sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg
+            echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm-archive-keyring.gpg] http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc)-${LLVM_MAJOR_VERSION} main" | \
+              sudo tee /etc/apt/sources.list.d/llvm.list
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
+      - if: runner.os == 'macOS'
+        run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
+
+      - if: contains(matrix.os, 'riscv')
+        name: Restore Ruby cache (riscv64)
+        id: ruby-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ env.RUBY_VERSION }}
+
+      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: rbenv/ruby-build
+          ref: v20260520
+          path: tmp/ruby-build
+
+      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Build Ruby (riscv64)
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            autoconf bison patch build-essential libssl-dev libyaml-dev \
+            libreadline-dev zlib1g-dev libgmp-dev libffi-dev
+          sudo ./tmp/ruby-build/install.sh
+          RUBY_EXACT=$(ruby-build --definitions | grep -E "^${RUBY_VERSION}\." | sort -V | tail -1)
+          echo "RUBY_EXACT=${RUBY_EXACT}"
+          [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition found for Ruby ${RUBY_VERSION}"; exit 1; }
+          ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
+          touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
+
+      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Save Ruby cache (riscv64)
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ env.RUBY_VERSION }}
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          cache-version: ${{ matrix.default_clang && 'default-clang' || 'default' }}
+
+      # - name: Debug session
+      #   if: contains(matrix.os, 'arm')
+      #   uses: mxschmitt/action-tmate@v3
+
+      - run: bundle exec rake spec
+
+  # musl and x86
+  docker:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    env:
+      BUNDLE_GEMFILE: ${{ matrix.gemfile && format('gemfiles/Gemfile-{0}', matrix.gemfile) || '' }}
+    name: Ruby${{ matrix.gemfile && format(' with {0}', matrix.gemfile) || '' }} on ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ruby/setup-ruby is incompatible with musl so we use apk ruby
+          # alpine:3.21 has llvm18-19 and ruby3.3
+          - {gemfile: '', container: 'alpine:3.21', pkg: apk}
+          # alpine:3.23 has llvm18-21 and ruby3.4
+          - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23', pkg: apk}
+          - {gemfile: 'ruby_3_1', container: 'i386/debian:12', pkg: apt}
+    steps:
+      - name: Bootstrap
+        run: |
+          if [ '${{ matrix.pkg }}' = 'apk' ]; then
+            apk add --no-cache ruby ruby-dev ruby-bundler build-base
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg git
+          fi
+      - name: Set versions
+        run: |
+          LLVM_MAJOR_VERSION=$(echo '${{ matrix.gemfile }}' | sed -nE 's/.*llvm_([0-9]+).*/\1/p')
+          echo "LLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION:-18}" >> "$GITHUB_ENV"
+      - if: matrix.pkg == 'apk'
+        uses: actions/checkout@v4
+      - if: matrix.pkg == 'apt'
+        name: Checkout
+        run: |
+          git config --global --add safe.directory '*'
+          git init .
+          git remote add origin 'https://github.com/${{ github.repository }}'
+          git fetch --depth 1 origin '${{ github.sha }}'
+          git checkout FETCH_HEAD
+      - name: Install LLVM
+        run: |
+          if [ '${{ matrix.pkg }}' = 'apk' ]; then
+            apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
+          else
+            gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 15CF4D18AF4F7421
+            gpg --export 15CF4D18AF4F7421 > /etc/apt/trusted.gpg.d/llvm.gpg
+            echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-${LLVM_MAJOR_VERSION} main" > /etc/apt/sources.list.d/llvm.list
+            apt-get update
+            apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
+          fi
+      - name: Install gems
+        run: |
+          bundle config set --local without development
+          bundle config set --local force_ruby_platform true
+          bundle config set --local frozen true
+          bundle install
+      - run: bundle exec rake spec
+
+  # LLVM ERROR: Inline asm not supported by this streamer because we don't have an asm parser for this target
+  freebsd:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    name: Ruby on freebsd-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # riscv doesn't have packages and isn't supported yet anyway
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          sync: rsync
+          copyback: false
+          release: '14.4'
+          arch: ${{ matrix.arch }}
+          usesh: true
+          prepare: |
+            pkg update
+            pkg install -y llvm18 ruby33
+            ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
+          run: |
+            export LLVM_CONFIG=llvm-config18
+            bundle config set --local without development
+            bundle config set --local frozen true
+            bundle install
+            bundle exec rake spec
