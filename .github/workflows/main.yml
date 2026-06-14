@@ -221,7 +221,7 @@ jobs:
           - {gemfile: '', container: 'alpine:3.21', pkg: apk}
           # alpine:3.23 has llvm18-21 and ruby3.4
           - {gemfile: 'ruby_3_4_llvm_21_1_0', container: 'alpine:3.23', pkg: apk}
-          - {gemfile: '', container: 'i386/ubuntu:24.04', pkg: apt}
+          - {gemfile: '', container: 'i386/debian:12', pkg: apt}
     steps:
       - name: Bootstrap
         run: |
@@ -229,7 +229,7 @@ jobs:
             apk add --no-cache ruby ruby-dev ruby-bundler build-base
           else
             apt-get update
-            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential
+            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg
           fi
       - name: Set versions
         run: |
@@ -241,6 +241,10 @@ jobs:
           if [ '${{ matrix.pkg }}' = 'apk' ]; then
             apk add --no-cache "llvm${LLVM_MAJOR_VERSION}-dev" "clang${LLVM_MAJOR_VERSION}"
           else
+            gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 15CF4D18AF4F7421
+            gpg --export 15CF4D18AF4F7421 > /etc/apt/trusted.gpg.d/llvm.gpg
+            echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-${LLVM_MAJOR_VERSION} main" > /etc/apt/sources.list.d/llvm.list
+            apt-get update
             apt-get install -y --no-install-recommends "llvm-${LLVM_MAJOR_VERSION}-dev" "clang-${LLVM_MAJOR_VERSION}"
           fi
       - name: Install gems
@@ -266,10 +270,10 @@ jobs:
           arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
-            sed -i '' 's/latest/quarterly/' /etc/pkg/FreeBSD.conf
             pkg update
-            pkg install -y llvm18 ruby33 ruby33-gems
+            pkg install -y llvm18 ruby34 ruby34-gems
           run: |
+            export BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_4
             export LLVM_CONFIG=llvm-config18
             gem install bundler --no-document
             bundle config set --local without development
