@@ -272,11 +272,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # riscv doesn't have packages and isn't supported yet anyway
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/freebsd-vm@v1
         with:
+          sync: rsync
+          copyback: false
           release: '14.4'
           arch: ${{ matrix.arch }}
           usesh: true
