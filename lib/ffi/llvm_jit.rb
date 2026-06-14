@@ -25,13 +25,19 @@ module FFI
     module Library # rubocop:disable Metrics/ModuleLength
       include ::FFI::Library
 
+      # RbConfig::CONFIG['host_cpu'] is amd64 on freebsd
+      # in LLVM_MOD.triple and LLVM::C.get_default_target_triple it's x86_64
+      # but I decided to add amd64 too
       SUPPORTED_ARCHS = {
         'x86_64' => :LLVMInitializeX86AsmParser,
+        'amd64' => :LLVMInitializeX86AsmParser,
         'i386' => :LLVMInitializeX86AsmParser,
         'aarch64' => :LLVMInitializeAArch64AsmParser,
         'arm64' => :LLVMInitializeAArch64AsmParser,
       }.freeze
-      SUPPORTED_OS = [/linux/, /darwin/, /freebsd/].freeze
+      # LLVM_MOD.triple => "arm64-apple-macosx15.0.0" / "x86_64-apple-macosx15.0.0"
+      # LLVM::C.get_default_target_triple => "arm64-apple-darwin24.6.0" / "x86_64-apple-darwin24.6.0"
+      SUPPORTED_OS = [/linux/, /darwin/, /macos/, /freebsd/].freeze
       private_constant :SUPPORTED_ARCHS, :SUPPORTED_OS
 
       LLVM_MOD = LLVM::Module.parse_bitcode(
@@ -39,7 +45,7 @@ module FFI
       )
       # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
-      LLVM_TRIPLE = LLVM_MOD.triple.split('-', 3).freeze
+      LLVM_TRIPLE = LLVM::C.get_default_target_triple.split('-', 3).freeze
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
@@ -377,7 +383,7 @@ module FFI
           var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
-          var.initializer = INTPTR.from_i(c_address).int_to_ptr(func_ptr_t)
+          var.initializer = INTPTR.from_i(c_address, signed: false).int_to_ptr(func_ptr_t)
         end
         void_ret = ret_type_name == :void
 
