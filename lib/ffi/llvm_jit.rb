@@ -383,7 +383,8 @@ module FFI
           var.linkage = :private
           var.global_constant = true
           var.unnamed_addr = true
-          var.initializer = INTPTR.from_i(c_address, signed: false).int_to_ptr(func_ptr_t)
+          # signed = false; 17 uses positional arg, 18 - option
+          var.initializer = INTPTR.from_i(c_address, false).int_to_ptr(func_ptr_t)
         end
         void_ret = ret_type_name == :void
 
