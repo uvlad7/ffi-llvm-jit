@@ -28,6 +28,9 @@ module FFI
       # RbConfig::CONFIG['host_cpu'] is amd64 on freebsd
       # in LLVM_MOD.triple and LLVM::C.get_default_target_triple it's x86_64
       # but I decided to add amd64 too
+
+      # TODO: use pairs
+      # {x86_64: [linux, darwin, freebsd, dragonfly], aarch64: [linux, darwin, freebsd], i386: [linux]}
       SUPPORTED_ARCHS = {
         'x86_64' => :LLVMInitializeX86AsmParser,
         'amd64' => :LLVMInitializeX86AsmParser,
@@ -256,8 +259,16 @@ module FFI
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
-        raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless
-          SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
+        $stderr.puts "RbConfig::CONFIG host_cpu=#{RbConfig::CONFIG['host_cpu']} target_cpu=#{RbConfig::CONFIG['target_cpu']}"
+        $stderr.puts "RbConfig::CONFIG host_os=#{RbConfig::CONFIG['host_os']} target_os=#{RbConfig::CONFIG['target_os']}"
+        $stderr.puts "RbConfig::MAKEFILE_CONFIG host_cpu=#{RbConfig::MAKEFILE_CONFIG['host_cpu']} target_cpu=#{RbConfig::MAKEFILE_CONFIG['target_cpu']}"
+        $stderr.puts "RbConfig::MAKEFILE_CONFIG host_os=#{RbConfig::MAKEFILE_CONFIG['host_os']} target_os=#{RbConfig::MAKEFILE_CONFIG['target_os']}"
+        $stderr.puts "LLVM default triple: #{LLVM::C.get_default_target_triple}"
+        $stderr.puts "LLVM_MOD triple: #{LLVM_MOD.triple}"
+        $stderr.puts "LLVM_TRIPLE parsed: #{LLVM_TRIPLE.inspect}"
+
+        # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless
+        #   SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
         unless unknown_options.empty?
