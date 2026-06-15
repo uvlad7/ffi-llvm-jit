@@ -104,9 +104,9 @@ jobs:
           - {gemfile: ruby_3_4,    label: 'Ruby 3.4, LLVM 18'}
           - {gemfile: ruby_4_0,    label: 'Ruby 4.0, LLVM 18'}
           - {gemfile: llvm_17_0_0, label: 'Ruby 3.3, LLVM 17.0.0'}
-          - {gemfile: llvm_19_1_6, label: 'Ruby 3.3, LLVM 19.1.6 '}
           - {gemfile: llvm_20_1_7, label: 'Ruby 3.3, LLVM 20.1.7'}
           - {gemfile: llvm_21_1_0, label: 'Ruby 3.3, LLVM 21.1.0'}
+          - {gemfile: ffi_1_16_3,  label: 'Ruby 3.3, LLVM 18, FFI 1.16.3'}
           - os: ubuntu-latest
             gemfile: llvm_17_0_0
             default_clang: true
@@ -152,7 +152,7 @@ jobs:
           - os: ubuntu-24.04-riscv
             gemfile: 'llvm_19_1_6'
             default_clang: false
-            label: 'Ruby 3.3, LLVM 18, FFI 1.16.3'
+            label: 'Ruby 3.3, LLVM 19'
 
     steps:
       - uses: actions/checkout@v4
@@ -300,7 +300,7 @@ jobs:
   freebsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.3, LLVM 18 on freebsd14.4-${{ matrix.arch }} vmaction
+    name: Ruby 3.3, LLVM 18 on FreeBSD 14.4 (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -330,28 +330,28 @@ jobs:
 
   # Alternative unified action: https://github.com/marketplace/actions/cross-platform-action
   # (covers FreeBSD, OpenBSD, NetBSD, DragonFlyBSD, MidnightBSD, Haiku, OmniOS but uses QEMU even for x86_64)
-  # OpenBSD 7.7: packages use full version in name (e.g. ruby-3.3.7, llvm-18.1.8p3) — install via grep
+  # OpenBSD 7.8: packages use full version in name (e.g. ruby-3.3.7, llvm-18.1.8p3) — install via grep
   # ruby33 binary; bundler via GemRunner; llvm-config-18 binary (standard OpenBSD naming)
   openbsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.3, LLVM 18 on OpenBSD 7.7 (${{ matrix.arch }})
+    name: Ruby 3.3, LLVM 18 on OpenBSD 7.8 (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        arch: [x86_64, aarch64, sparc64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/openbsd-vm@v1
         with:
           sync: rsync
           copyback: false
-          release: '7.7'
+          release: '7.9'
           arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
-            pkg_add $(pkg_info -Q ruby | grep '^ruby-3\.3\.' | head -1)   # ruby-3.3.x (3.3.7 on OpenBSD 7.7)
-            pkg_add $(pkg_info -Q llvm | grep '^llvm-18\.' | head -1)     # llvm-18.x.y (18.1.8p3 on OpenBSD 7.7)
+            pkg_add $(pkg_info -Q ruby | grep '^ruby-3\.3\.' | head -1)   # ruby-3.3.x (3.3.7 on OpenBSD 7.8)
+            pkg_add $(pkg_info -Q llvm | grep '^llvm-18\.' | head -1)     # llvm-18.x.y (18.1.8p3 on OpenBSD 7.8)
             ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
             find /usr/local/bin -name 'llvm-config*' 2>/dev/null || true
           run: |
@@ -373,7 +373,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        arch: [x86_64, aarch64, sparc64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/netbsd-vm@v1
@@ -400,15 +400,20 @@ jobs:
   dragonflybsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.3, LLVM 18 on DragonFlyBSD 6.4
+    name: Ruby 3.3, LLVM 18 on DragonFlyBSD 6.4.1
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/dragonflybsd-vm@v1
         with:
           sync: rsync
           copyback: false
+          release: '6.4.1'
+          arch: ${{ matrix.arch }}
           usesh: true
-          release: "6.4.0"
           prepare: |
             pkg install -y llvm18 ruby33
             ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
@@ -427,14 +432,19 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
     name: Ruby 3.2, LLVM 18 on Haiku r1beta5
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/haiku-vm@v1
         with:
           sync: rsync
           copyback: false
+          release: 'r1beta5'
+          arch: ${{ matrix.arch }}
           usesh: true
-          release: "r1beta5"
           prepare: |
             pkgman install -y openssl llvm18 llvm18_clang ruby  # ruby: HaikuPorts current (3.2.x as of r1beta5)
             find /boot -name 'llvm*config*' 2>/dev/null | sort || true
@@ -454,13 +464,19 @@ jobs:
   omnios_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.3, LLVM 18 on OmniOS
+    name: Ruby 3.3, LLVM 18 on OmniOS r151054
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/omnios-vm@v1
         with:
           sync: rsync
           copyback: false
+          release: 'r151054-build'
+          arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
             pkg install ooce/runtime/ruby-33 ooce/developer/llvm-18 ooce/developer/gcc-14
@@ -484,7 +500,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [armv7, ppc64le, s390x]
+        # Also s390x, but it takes 5+ hours to complete
+        arch: [armv7, ppc64le]
     steps:
       - uses: actions/checkout@v4
       - uses: uraimo/run-on-arch-action@v3

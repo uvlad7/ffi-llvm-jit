@@ -45,5 +45,6 @@ puts "------------------------------"
 LLVM.init_jit
 
 engine = LLVM::JITCompiler.new(mod)
+puts engine.function_address(main.name)
 engine.run_function(main)
 engine.dispose

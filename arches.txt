@@ -1,0 +1,12 @@
+❯ MCJIT is not supported on arm-linux-gnueabihf
+  MCJIT is not supported on arm-linux-gnueabihf
+  MCJIT is not supported on s390x-linux-gnu
+
+
+ RbConfig::CONFIG host_cpu=s390x target_cpu=s390x
+  RbConfig::CONFIG host_os=linux-gnu target_os=linux-gnu
+  RbConfig::MAKEFILE_CONFIG host_cpu=$(target_cpu) target_cpu=s390x
+  RbConfig::MAKEFILE_CONFIG host_os=$(target_os) target_os=linux-gnu
+  LLVM default triple: s390x-linux-gnu
+  LLVM_MOD triple: s390x-unknown-linux-gnu
+  LLVM_TRIPLE parsed: ["s390x", "linux", "gnu"]
