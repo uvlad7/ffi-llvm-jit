@@ -279,8 +279,8 @@ jobs:
           fi
       - name: Log versions
         run: |
-          ruby --version
-          llvm-config-${LLVM_MAJOR_VERSION} --version
+          echo "ruby version: $(ruby --version)"
+          echo "llvm version: $(llvm-config-${LLVM_MAJOR_VERSION} --version)"
       - name: Install gems
         run: |
           bundle config set --local without development
@@ -314,8 +314,8 @@ jobs:
             ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
           run: |
             export LLVM_CONFIG=llvm-config18
-            ruby33 --version
-            llvm-config18 --version
+            echo "ruby version: $(ruby33 --version)"
+            echo "llvm version: $(llvm-config18 --version)"
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
@@ -323,11 +323,11 @@ jobs:
 
   # Alternative unified action: https://github.com/marketplace/actions/cross-platform-action
   # (covers FreeBSD, OpenBSD, NetBSD, DragonFlyBSD, MidnightBSD, Haiku, OmniOS but uses QEMU even for x86_64)
-  # OpenBSD 7.7: neither ruby-3.3 nor ruby-3.4 matched; using unversioned 'ruby' stem; llvm has 16/18/19
+  # OpenBSD 7.7: ruby-3.3 matches ruby-3.3.7 (binary: ruby33); llvm18 follows BSD-style naming (like FreeBSD)
   openbsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby, LLVM 18 on OpenBSD 7.7 (${{ matrix.arch }})
+    name: Ruby 3.3, LLVM on OpenBSD 7.7 (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -342,23 +342,27 @@ jobs:
           arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
-            pkg_add ruby llvm-18
-            ruby -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
+            pkg_info -Q llvm || true
+            pkg_add ruby-3.3
+            pkg_add llvm18 || pkg_add llvm  # llvm18: BSD-style naming; fallback to current llvm
+            ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
+            find /usr/local/bin -name 'llvm-config*' 2>/dev/null || true
           run: |
-            export LLVM_CONFIG=llvm-config-18
-            ruby --version
-            llvm-config-18 --version
-            bundle config set --local without development
-            bundle config set --local frozen true
-            bundle install
-            bundle exec rake spec
+            echo "ruby version: $(ruby33 --version)"
+            export LLVM_CONFIG=$(find /usr/local/bin -name 'llvm-config*' 2>/dev/null | sort | head -1)
+            echo "llvm version: $($LLVM_CONFIG --version)"
+            export BUNDLE=$(ruby33 -e 'puts Gem.bindir')/bundle
+            $BUNDLE config set --local without development
+            $BUNDLE config set --local frozen true
+            $BUNDLE install
+            $BUNDLE exec rake spec
 
-  # NetBSD 10.1: pkgin not on vmactions image, using pkg_add directly; llvm is pkgsrc current (21.x)
+  # NetBSD 10.1: pkgin not on vmactions image, using pkg_add directly; llvm is pkgsrc current (19.x)
   # bundler is bundled with ruby33 as bundle33
   netbsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.3, LLVM on NetBSD 10.1 (${{ matrix.arch }})
+    name: Ruby 3.3, LLVM 19 on NetBSD 10.1 (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -373,12 +377,12 @@ jobs:
           arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
-            pkg_add ruby33 llvm  # llvm: pkgsrc current (21.x as of NetBSD 10.1)
+            pkg_add ruby33 llvm  # llvm: pkgsrc current (19.x as of NetBSD 10.1)
           run: |
             export PATH="/usr/pkg/bin:$PATH"
             export LLVM_CONFIG=/usr/pkg/bin/llvm-config
-            ruby33 --version
-            llvm-config --version
+            echo "ruby version: $(ruby33 --version)"
+            echo "llvm version: $(llvm-config --version)"
             bundle33 config set --local without development
             bundle33 config set --local frozen true
             bundle33 install
@@ -401,20 +405,18 @@ jobs:
             ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
           run: |
             export LLVM_CONFIG=llvm-config18
-            ruby33 --version
-            llvm-config18 --version
+            echo "ruby version: $(ruby33 --version)"
+            echo "llvm version: $(llvm-config18 --version)"
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
             bundle exec rake spec
 
-  # Haiku r1beta5: ruby is 3.2.x (no 3.3 yet); llvm18_devel not in repos, using llvm17_devel
+  # Haiku r1beta5: ruby is 3.2.x (no 3.3 yet); no _devel packages — llvm18 includes headers
   haiku_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.2, LLVM 17 on Haiku r1beta5
-    env:
-      BUNDLE_GEMFILE: gemfiles/Gemfile-llvm_17_0_0
+    name: Ruby 3.2, LLVM 18 on Haiku r1beta5
     steps:
       - uses: actions/checkout@v4
       - uses: vmactions/haiku-vm@v1
@@ -423,12 +425,11 @@ jobs:
           copyback: false
           usesh: true
           prepare: |
-            pkgman search llvm || true
-            pkgman install -y llvm17_devel ruby  # ruby: HaikuPorts current (3.2.x as of r1beta5)
+            pkgman install -y llvm18 llvm18_clang ruby  # ruby: HaikuPorts current (3.2.x as of r1beta5)
           run: |
-            export LLVM_CONFIG=llvm17-config
-            ruby --version
-            llvm17-config --version
+            export LLVM_CONFIG=llvm18-config
+            echo "ruby version: $(ruby --version)"
+            echo "llvm version: $(llvm18-config --version)"
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
@@ -437,6 +438,7 @@ jobs:
   # Solaris: removed — LLVM is not available in Oracle IPS and there is no viable alternative source
 
   # OmniOS: ruby-33 and llvm-18 are in the extra.omnios publisher (pre-configured in vmactions image)
+  # IPS package FMRIs use the ooce/ namespace, not extra.omnios/ (publisher is just for origin config)
   omnios_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
@@ -449,11 +451,12 @@ jobs:
           copyback: false
           usesh: true
           prepare: |
-            pkg install extra.omnios/ruby-33 extra.omnios/llvm-18
+            pkg search -r ruby || true
+            pkg install ooce/runtime/ruby-33 ooce/developer/llvm-18
           run: |
             export LLVM_CONFIG=llvm-config-18
-            ruby --version
-            llvm-config-18 --version
+            echo "ruby version: $(ruby --version)"
+            echo "llvm version: $(llvm-config-18 --version)"
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
@@ -480,9 +483,10 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential llvm-18-dev clang-18  # ruby: Ubuntu 24.04 current (3.2.x)
           run: |
-            ruby --version
-            llvm-config-18 --version
+            echo "ruby version: $(ruby --version)"
+            echo "llvm version: $(llvm-config-18 --version)"
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
+            bundle exec ruby hello.rb
             bundle exec rake spec

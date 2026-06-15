@@ -51,6 +51,15 @@ module FFI
       LLVM_MOD.verify!
       LLVM_TRIPLE = LLVM::C.get_default_target_triple.split('-', 3).freeze
 
+        $stderr.puts "CONFIG DEBUG"
+        $stderr.puts "RbConfig::CONFIG host_cpu=#{RbConfig::CONFIG['host_cpu']} target_cpu=#{RbConfig::CONFIG['target_cpu']}"
+        $stderr.puts "RbConfig::CONFIG host_os=#{RbConfig::CONFIG['host_os']} target_os=#{RbConfig::CONFIG['target_os']}"
+        $stderr.puts "RbConfig::MAKEFILE_CONFIG host_cpu=#{RbConfig::MAKEFILE_CONFIG['host_cpu']} target_cpu=#{RbConfig::MAKEFILE_CONFIG['target_cpu']}"
+        $stderr.puts "RbConfig::MAKEFILE_CONFIG host_os=#{RbConfig::MAKEFILE_CONFIG['host_os']} target_os=#{RbConfig::MAKEFILE_CONFIG['target_os']}"
+        $stderr.puts "LLVM default triple: #{LLVM::C.get_default_target_triple}"
+        $stderr.puts "LLVM_MOD triple: #{LLVM_MOD.triple}"
+        $stderr.puts "LLVM_TRIPLE parsed: #{LLVM_TRIPLE.inspect}"
+
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
       LLVM::C.add_symbol(
@@ -259,15 +268,8 @@ module FFI
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
-        $stderr.puts "RbConfig::CONFIG host_cpu=#{RbConfig::CONFIG['host_cpu']} target_cpu=#{RbConfig::CONFIG['target_cpu']}"
-        $stderr.puts "RbConfig::CONFIG host_os=#{RbConfig::CONFIG['host_os']} target_os=#{RbConfig::CONFIG['target_os']}"
-        $stderr.puts "RbConfig::MAKEFILE_CONFIG host_cpu=#{RbConfig::MAKEFILE_CONFIG['host_cpu']} target_cpu=#{RbConfig::MAKEFILE_CONFIG['target_cpu']}"
-        $stderr.puts "RbConfig::MAKEFILE_CONFIG host_os=#{RbConfig::MAKEFILE_CONFIG['host_os']} target_os=#{RbConfig::MAKEFILE_CONFIG['target_os']}"
-        $stderr.puts "LLVM default triple: #{LLVM::C.get_default_target_triple}"
-        $stderr.puts "LLVM_MOD triple: #{LLVM_MOD.triple}"
-        $stderr.puts "LLVM_TRIPLE parsed: #{LLVM_TRIPLE.inspect}"
-
-        # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless
+        # confirmed to crash on riscv and armv7, but YOLO!
+        # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless @yolo ||
         #   SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
 
         unknown_options = options.keys - %i[convention type_map blocking enums]

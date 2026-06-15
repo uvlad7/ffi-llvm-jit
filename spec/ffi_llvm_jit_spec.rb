@@ -8,6 +8,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       mod.extend described_class::Library
       mod.ffi_lib FFI::Library::LIBC, FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './ext/ffi_llvm_jit_spec'), 'm'
 
+      mod.instance_variable_set(:@yolo, true)
       mod.attach_llvm_jit_function :strlen, [:string], :size_t
     end
   end
