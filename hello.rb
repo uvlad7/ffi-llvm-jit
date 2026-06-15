@@ -38,13 +38,18 @@ main = mod.functions.add('main', [], LLVM::Int32) do |function|
   end
 end
 
-mod.dump
+# mod.dump
 #mod.dispose
 puts "------------------------------"
 
+puts 'init_jit'
 LLVM.init_jit
 
+puts 'JITCompiler'
 engine = LLVM::JITCompiler.new(mod)
+puts 'function_address'
 puts engine.function_address(main.name)
+puts 'run_function'
 engine.run_function(main)
+puts 'dispose'
 engine.dispose

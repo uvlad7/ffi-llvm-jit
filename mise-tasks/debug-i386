@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#MISE description="Spin up i386/debian:12 container for debugging (matches CI)"
+#USAGE flag "--rebuild" help="Force rebuild of the cached image"
+set -euo pipefail
+
+PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+IMAGE="ffi-llvm-jit-i386-debug:latest"
+CONTAINER_NAME="ffi-llvm-jit-i386-build-$$"
+
+if [[ -n "${usage_rebuild:-}" ]]; then
+  docker rmi "$IMAGE" 2>/dev/null || true
+fi
+
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+  echo "==> Building cached image (first run only)..."
+  trap 'docker rm -f "$CONTAINER_NAME" 2>/dev/null || true' EXIT
+  docker run \
+    --name "$CONTAINER_NAME" \
+    --platform linux/386 \
+    -v "${PROJECT_ROOT}:/workspace" \
+    -w /workspace \
+    i386/debian:12 \
+    bash -c '
+      set -e
+      apt-get update -qq
+      apt-get install -y --no-install-recommends \
+        ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg nano
+      gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 15CF4D18AF4F7421
+      gpg --export 15CF4D18AF4F7421 > /etc/apt/trusted.gpg.d/llvm.gpg
+      echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-18 main" > /etc/apt/sources.list.d/llvm.list
+      apt-get update -qq
+      apt-get install -y --no-install-recommends llvm-18-dev clang-18
+      echo "ruby version: $(ruby --version)"
+      echo "llvm version: $(llvm-config-18 --version)"
+      bundle config set --global without development
+      bundle config set --global force_ruby_platform true
+      BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_1 bundle install
+    '
+  docker commit --change "ENV BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_1" "$CONTAINER_NAME" "$IMAGE"
+fi
+
+echo "==> Starting i386/debian:12 container (matches CI)..."
+docker run --rm -it \
+  --platform linux/386 \
+  -e BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_1 \
+  -v "${PROJECT_ROOT}:/workspace" \
+  -w /workspace \
+  "$IMAGE" \
+  bash

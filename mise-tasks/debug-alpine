@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#MISE description="Spin up alpine:3.21 container for debugging (matches CI)"
+#USAGE flag "--rebuild" help="Force rebuild of the cached image"
+set -euo pipefail
+
+PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+IMAGE="ffi-llvm-jit-alpine-debug:latest"
+CONTAINER_NAME="ffi-llvm-jit-alpine-build-$$"
+
+if [[ -n "${usage_rebuild:-}" ]]; then
+  docker rmi "$IMAGE" 2>/dev/null || true
+fi
+
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+  echo "==> Building cached image (first run only)..."
+  trap 'docker rm -f "$CONTAINER_NAME" 2>/dev/null || true' EXIT
+  docker run \
+    --name "$CONTAINER_NAME" \
+    -v "${PROJECT_ROOT}:/workspace" \
+    -w /workspace \
+    alpine:3.21 \
+    sh -c '
+      set -e
+      apk add --no-cache ruby ruby-dev ruby-bundler build-base llvm18-dev clang18 nano
+      echo "ruby version: $(ruby --version)"
+      echo "llvm version: $(llvm-config-18 --version)"
+      bundle config set --global without development
+      bundle install
+    '
+  docker commit "$CONTAINER_NAME" "$IMAGE"
+fi
+
+echo "==> Starting alpine:3.21 container (matches CI)..."
+docker run --rm -it \
+  -v "${PROJECT_ROOT}:/workspace" \
+  -w /workspace \
+  "$IMAGE" \
+  sh

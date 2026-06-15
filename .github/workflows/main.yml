@@ -146,9 +146,11 @@ jobs:
           - os: ubuntu-24.04-riscv
             gemfile: ''
             default_clang: false
+            label: 'Ruby 3.3, LLVM 18'
           - os: ubuntu-24.04-riscv
             gemfile: 'ruby_3_4'
             default_clang: false
+            label: 'Ruby 3.4, LLVM 18'
           - os: ubuntu-24.04-riscv
             gemfile: 'llvm_19_1_6'
             default_clang: false
