@@ -226,7 +226,7 @@ jobs:
       #   if: contains(matrix.os, 'arm')
       #   uses: mxschmitt/action-tmate@v3
 
-      - run: bundle exec ruby hello.rb && bundle exec rake spec
+      - run: bundle exec ruby hello.rb && bundle exec ruby fp.rb && bundle exec ruby factorial.rb && bundle exec rake spec
 
   # musl and x86
   docker:
@@ -501,5 +501,5 @@ jobs:
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
-            bundle exec ruby hello.rb
+            bundle exec ruby hello.rb && bundle exec ruby fp.rb && bundle exec ruby factorial.rb
             bundle exec rake spec
