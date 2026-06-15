@@ -197,6 +197,13 @@ module FFI
         attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: true)
       end
 
+      def yolo!
+        # riscv is confirmed to segfault
+        # you still can set @yolo yourself if you are feeling lucky
+        # YOLO!
+        @yolo = true unless LLVM_TRIPLE[0] =~ /riscv/
+      end
+
       private
 
       # Part copied from refactored FFI for compatibility
@@ -268,7 +275,6 @@ module FFI
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
-        # confirmed to crash on riscv and armv7, but YOLO!
         # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless @yolo ||
         #   SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
 

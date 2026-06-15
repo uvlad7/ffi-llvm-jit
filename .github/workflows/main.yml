@@ -104,6 +104,7 @@ jobs:
           - {gemfile: ruby_3_4,    label: 'Ruby 3.4, LLVM 18'}
           - {gemfile: ruby_4_0,    label: 'Ruby 4.0, LLVM 18'}
           - {gemfile: llvm_17_0_0, label: 'Ruby 3.3, LLVM 17.0.0'}
+          - {gemfile: llvm_19_1_6, label: 'Ruby 3.3, LLVM 19.1.6 '}
           - {gemfile: llvm_20_1_7, label: 'Ruby 3.3, LLVM 20.1.7'}
           - {gemfile: llvm_21_1_0, label: 'Ruby 3.3, LLVM 21.1.0'}
           - {gemfile: ffi_1_16_3,  label: 'Ruby 3.3, LLVM 18, FFI 1.16.3'}
@@ -143,12 +144,15 @@ jobs:
           # apt.llvm.org has no riscv64 packages; ruby/setup-ruby has no riscv64 prebuilts so we use ruby-build
 
           # MCJIT crashes in get_function_address - confirmed on hello.rb with ruby-llvm 18.2.0 and 19.1.6
-          # - os: ubuntu-24.04-riscv
-          #   gemfile: ''
-          #   default_clang: false
-          # - os: ubuntu-24.04-riscv
-          #   gemfile: 'ruby_3_4'
-          #   default_clang: false
+          - os: ubuntu-24.04-riscv
+            gemfile: ''
+            default_clang: false
+          - os: ubuntu-24.04-riscv
+            gemfile: 'ruby_3_4'
+            default_clang: false
+          - os: ubuntu-24.04-riscv
+            gemfile: 'llvm_19_1_6'
+            default_clang: false
 
     steps:
       - uses: actions/checkout@v4
@@ -222,7 +226,7 @@ jobs:
       #   if: contains(matrix.os, 'arm')
       #   uses: mxschmitt/action-tmate@v3
 
-      - run: bundle exec rake spec
+      - run: bundle exec ruby hello.rb && bundle exec rake spec
 
   # musl and x86
   docker:
@@ -289,6 +293,9 @@ jobs:
           bundle install
       - run: bundle exec rake spec
 
+
+# TODO: add release: to all vm actions, check arches
+
   # LLVM ERROR: Inline asm not supported by this streamer because we don't have an asm parser for this target
   freebsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
@@ -323,11 +330,12 @@ jobs:
 
   # Alternative unified action: https://github.com/marketplace/actions/cross-platform-action
   # (covers FreeBSD, OpenBSD, NetBSD, DragonFlyBSD, MidnightBSD, Haiku, OmniOS but uses QEMU even for x86_64)
-  # OpenBSD 7.7: ruby-3.3 matches ruby-3.3.7 (binary: ruby33); llvm18 follows BSD-style naming (like FreeBSD)
+  # OpenBSD 7.7: packages use full version in name (e.g. ruby-3.3.7, llvm-18.1.8p3) — install via grep
+  # ruby33 binary; bundler via GemRunner; llvm-config-18 binary (standard OpenBSD naming)
   openbsd_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby 3.3, LLVM on OpenBSD 7.7 (${{ matrix.arch }})
+    name: Ruby 3.3, LLVM 18 on OpenBSD 7.7 (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -342,9 +350,8 @@ jobs:
           arch: ${{ matrix.arch }}
           usesh: true
           prepare: |
-            pkg_info -Q llvm || true
-            pkg_add ruby-3.3
-            pkg_add llvm18 || pkg_add llvm  # llvm18: BSD-style naming; fallback to current llvm
+            pkg_add $(pkg_info -Q ruby | grep '^ruby-3\.3\.' | head -1)   # ruby-3.3.x (3.3.7 on OpenBSD 7.7)
+            pkg_add $(pkg_info -Q llvm | grep '^llvm-18\.' | head -1)     # llvm-18.x.y (18.1.8p3 on OpenBSD 7.7)
             ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
             find /usr/local/bin -name 'llvm-config*' 2>/dev/null || true
           run: |
@@ -381,6 +388,7 @@ jobs:
           run: |
             export PATH="/usr/pkg/bin:$PATH"
             export LLVM_CONFIG=/usr/pkg/bin/llvm-config
+            export BUNDLE_GEMFILE=gemfiles/Gemfile-llvm_19_1_6
             echo "ruby version: $(ruby33 --version)"
             echo "llvm version: $(llvm-config --version)"
             bundle33 config set --local without development
@@ -400,6 +408,7 @@ jobs:
           sync: rsync
           copyback: false
           usesh: true
+          release: "6.4.0"
           prepare: |
             pkg install -y llvm18 ruby33
             ruby33 -e "require 'rubygems'; require 'rubygems/gem_runner'; Gem::GemRunner.new.run(['install', 'bundler', '--no-document'])"
@@ -413,6 +422,7 @@ jobs:
             bundle exec rake spec
 
   # Haiku r1beta5: ruby is 3.2.x (no 3.3 yet); no _devel packages — llvm18 includes headers
+  # openssl needed before ruby so bundler can use HTTPS for gem installs
   haiku_vm:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
@@ -424,12 +434,14 @@ jobs:
           sync: rsync
           copyback: false
           usesh: true
+          release: "r1beta5"
           prepare: |
-            pkgman install -y llvm18 llvm18_clang ruby  # ruby: HaikuPorts current (3.2.x as of r1beta5)
+            pkgman install -y openssl llvm18 llvm18_clang ruby  # ruby: HaikuPorts current (3.2.x as of r1beta5)
+            find /boot -name 'llvm*config*' 2>/dev/null | sort || true
           run: |
-            export LLVM_CONFIG=llvm18-config
+            export LLVM_CONFIG=$(find /boot -name 'llvm*config*' 2>/dev/null | sort | head -1)
             echo "ruby version: $(ruby --version)"
-            echo "llvm version: $(llvm18-config --version)"
+            echo "llvm version: $($LLVM_CONFIG --version)"
             bundle config set --local without development
             bundle config set --local frozen true
             bundle install
@@ -451,9 +463,10 @@ jobs:
           copyback: false
           usesh: true
           prepare: |
-            pkg search -r ruby || true
-            pkg install ooce/runtime/ruby-33 ooce/developer/llvm-18
+            pkg install ooce/runtime/ruby-33 ooce/developer/llvm-18 ooce/developer/gcc-14
+            which cc gcc 2>/dev/null || find /opt/ooce /usr -name 'gcc*' -type f 2>/dev/null | head -5 || true
           run: |
+            export PATH="/opt/ooce/bin:$PATH"
             export LLVM_CONFIG=llvm-config-18
             echo "ruby version: $(ruby --version)"
             echo "llvm version: $(llvm-config-18 --version)"
