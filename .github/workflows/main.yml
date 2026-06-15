@@ -107,7 +107,6 @@ jobs:
           - {gemfile: llvm_19_1_6, label: 'Ruby 3.3, LLVM 19.1.6 '}
           - {gemfile: llvm_20_1_7, label: 'Ruby 3.3, LLVM 20.1.7'}
           - {gemfile: llvm_21_1_0, label: 'Ruby 3.3, LLVM 21.1.0'}
-          - {gemfile: ffi_1_16_3,  label: 'Ruby 3.3, LLVM 18, FFI 1.16.3'}
           - os: ubuntu-latest
             gemfile: llvm_17_0_0
             default_clang: true
@@ -153,6 +152,7 @@ jobs:
           - os: ubuntu-24.04-riscv
             gemfile: 'llvm_19_1_6'
             default_clang: false
+            label: 'Ruby 3.3, LLVM 18, FFI 1.16.3'
 
     steps:
       - uses: actions/checkout@v4
