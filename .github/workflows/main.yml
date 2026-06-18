@@ -48,8 +48,9 @@ jobs:
         run: brew update && brew install llvm@18 && brew link llvm@18 --force
 
       # - if: runner.os == 'Windows'
-      #   shell: cmd
-      #   run: ridk exec sh -c "pacman --sync --refresh --needed --noconfirm llvm"
+      #   run: |
+      #     ridk install 1 2 3
+      #     ridk exec sh -c 'pacman --sync --refresh --sysupgrade --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#MISE description="Spin up armv7 Ubuntu 24.04 QEMU container for debugging"
+#MISE description="Spin up armv7 Alpine edge QEMU container with LLVM 21 for debugging"
 #USAGE flag "--rebuild" help="Force rebuild of the cached image"
 set -euo pipefail
 
 PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-IMAGE="ffi-llvm-jit-armv7-debug:latest"
-CONTAINER_NAME="ffi-llvm-jit-armv7-build-$$"
+IMAGE="ffi-llvm-jit-armv7-alpine-debug:latest"
+CONTAINER_NAME="ffi-llvm-jit-armv7-alpine-build-$$"
 
 if [[ -n "${usage_rebuild:-}" ]]; then
   docker rmi "$IMAGE" 2>/dev/null || true
@@ -17,30 +17,33 @@ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "==> Building cached image (first run only)..."
   trap 'docker rm -f "$CONTAINER_NAME" 2>/dev/null || true' EXIT
+  # NOTE: must be alpine:edge - llvm21-dev/clang21 are not in stable releases yet
   docker run \
     --name "$CONTAINER_NAME" \
     --platform linux/arm/v7 \
     -v "${PROJECT_ROOT}:/workspace" \
     -w /workspace \
-    ubuntu:24.04 \
-    bash -c '
+    alpine:edge \
+    sh -c '
       set -e
-      apt-get update -qq
-      apt-get install -y --no-install-recommends \
-        ruby ruby-dev ruby-bundler build-essential llvm-18-dev clang-18 nano
+      apk update
+      apk add --no-cache ruby ruby-dev ruby-bundler build-base bash nano git llvm21-dev clang21
       echo "ruby version: $(ruby --version)"
-      echo "llvm version: $(llvm-config-18 --version)"
+      echo "llvm version: $(llvm-config-21 --version)"
+      echo "shared mode: $(llvm-config-21 --shared-mode)"
+      export BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_4_llvm_21_1_0
       bundle config set --global without development
       bundle install
     '
-  docker commit "$CONTAINER_NAME" "$IMAGE"
+  docker commit --change "ENV BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_4_llvm_21_1_0" "$CONTAINER_NAME" "$IMAGE"
 fi
 
-echo "==> Starting armv7 Ubuntu 24.04 container (matches CI)..."
+echo "==> Starting armv7 Alpine edge container with LLVM 21..."
 docker run --rm -it \
   --platform linux/arm/v7 \
   --cap-add=SYS_PTRACE \
   --security-opt seccomp=unconfined \
+  -e BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_4_llvm_21_1_0 \
   -v "${PROJECT_ROOT}:/workspace" \
   -w /workspace \
   "$IMAGE" \

@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+#MISE description="Spin up Windows Server 2022 VM (dockur/windows) for debugging ruby-llvm Windows install"
+#USAGE flag "--rebuild" help="Destroy persistent storage and start fresh"
+#USAGE flag "--iso <path>" help="Use a local Windows ISO instead of downloading; only valid combined with --rebuild (cached and auto-reused on later runs)"
+#USAGE flag "--shell <shell>" {
+#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, or bash (MSYS2 and MINGW development toolchain, via ridk exec bash)"
+#USAGE   default "powershell"
+#USAGE   choices "powershell" "cmd" "bash"
+#USAGE }
+set -euo pipefail
+
+PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+VOLUME="ffi-llvm-jit-win-storage"
+STORAGE_DIR="${PROJECT_ROOT}/mise-tasks/debug-win-storage"
+OEM_DIR="${STORAGE_DIR}/win-oem"
+SSH_KEY="${STORAGE_DIR}/win_ssh_key"
+SENTINEL="${STORAGE_DIR}/win-setup-done"
+INSTALL_LOG="${STORAGE_DIR}/win-install.log"
+ISO_CACHE="${STORAGE_DIR}/last-iso-path"
+RUN_CONTAINER="ffi-llvm-jit-win-run-$$"
+
+if [[ -n "${usage_rebuild:-}" ]]; then
+  docker volume rm "$VOLUME" 2>/dev/null || true
+  rm -f "$SENTINEL" "$INSTALL_LOG" "$ISO_CACHE"
+fi
+
+mkdir -p "$OEM_DIR"
+
+# Generate SSH keypair once; persists in debug-win-storage/ (gitignored)
+if [[ ! -f "$SSH_KEY" ]]; then
+  echo "==> Generating SSH keypair..."
+  ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -C "ffi-llvm-jit-win-debug"
+fi
+cp "${SSH_KEY}.pub" "${OEM_DIR}/authorized_keys"
+
+# install.bat runs once automatically after Windows finishes its initial setup.
+# It installs RubyInstaller + MSYS2 toolchain + LLVM and maps the project share.
+cat > "$OEM_DIR/install.bat" << 'ENDBAT'
+@echo off
+setlocal
+chcp 65001 >nul
+
+set LOG=Z:\mise-tasks\debug-win-storage\win-install.log
+
+:wait_share
+net use Z: \\host.lan\Data /persistent:yes >nul 2>&1
+if errorlevel 1 (
+  timeout /t 2 >nul
+  goto wait_share
+)
+
+echo ==^> Project share mapped to Z:\... > %LOG%
+echo ==^> Enabling remote elevation for local admin accounts (UAC token policy)... >> %LOG%
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f >> %LOG% 2>&1
+
+echo ==^> Waiting for network connectivity... >> %LOG%
+:wait_network
+ping -n 1 8.8.8.8 >nul 2>&1
+if errorlevel 1 (
+  timeout /t 2 >nul
+  goto wait_network
+)
+echo ==^> Network is up. >> %LOG%
+
+echo ==^> Installing OpenSSH Server... >> %LOG%
+powershell -Command "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType Automatic" >> %LOG% 2>&1
+
+echo ==^> Installing SSH authorized key... >> %LOG%
+mkdir C:\ProgramData\ssh 2>nul
+copy "%~dp0authorized_keys" C:\ProgramData\ssh\administrators_authorized_keys >> %LOG% 2>&1
+powershell -Command "icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant '*S-1-5-18:(F)' /grant '*S-1-5-32-544:(F)'; Restart-Service sshd" >> %LOG% 2>&1
+
+echo ==^> Downloading RubyInstaller 3.3.8 with DevKit... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\rubyinstaller.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.3.8-1/rubyinstaller-devkit-3.3.8-1-x64.exe" >> %LOG% 2>&1
+echo ==^> Installing Ruby 3.3 with DevKit (silent)... >> %LOG%
+"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby33-x64" /components="ruby,rdoc,msys2" /tasks="modpath,assocfiles,noridkinstall" >> %LOG% 2>&1
+echo ==^> Initializing MSYS2 base, system update, and MINGW development toolchain (ridk install 1 2 3)... >> %LOG%
+call C:\Ruby33-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
+echo ==^> Installing LLVM via MSYS2... >> %LOG%
+call C:\Ruby33-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm' >> %LOG% 2>&1
+
+echo ==^> ruby version: >> %LOG%
+C:\Ruby33-x64\bin\ruby.exe --version >> %LOG% 2>&1
+echo ==^> llvm version: >> %LOG%
+call C:\Ruby33-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
+
+echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
+reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
+reg add "HKCU\Console" /v CtrlKeyShortcutsDisabled /t REG_DWORD /d 1 /f >> %LOG% 2>&1
+reg add "HKCU\Console" /v QuickEdit /t REG_DWORD /d 1 /f >> %LOG% 2>&1
+reg add "HKCU\Console" /v InterceptCopyPaste /t REG_DWORD /d 1 /f >> %LOG% 2>&1
+rem install.bat's own context (SYSTEM vs Docker user) is unclear, so also
+rem schedule the same fix to run as whichever user next logs in interactively.
+reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce" /v EnableConsoleShortcuts /t REG_SZ /d "cmd /c reg add \"HKCU\Console\" /v ForceV2 /t REG_DWORD /d 1 /f & reg add \"HKCU\Console\" /v CtrlKeyShortcutsDisabled /t REG_DWORD /d 1 /f & reg add \"HKCU\Console\" /v QuickEdit /t REG_DWORD /d 1 /f & reg add \"HKCU\Console\" /v InterceptCopyPaste /t REG_DWORD /d 1 /f" /f >> %LOG% 2>&1
+
+echo ==^> install.bat finished. >> %LOG%
+
+echo done > Z:\mise-tasks\debug-win-storage\win-setup-done
+ENDBAT
+
+# echo ==^> Running bundle install for Windows gemfile... >> %LOG%
+# cd /d Z:\
+# set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-win
+# C:\Ruby33-x64\bin\bundle config set --global without development >> %LOG% 2>&1
+# C:\Ruby33-x64\bin\bundle install >> %LOG% 2>&1
+
+KVM_FLAG=""
+if [[ -e /dev/kvm ]]; then
+  KVM_FLAG="--device /dev/kvm"
+else
+  echo "WARNING: /dev/kvm not found — VM will run without hardware acceleration (very slow)"
+fi
+
+if [[ -n "${usage_iso:-}" && -z "${usage_rebuild:-}" ]]; then
+  echo "WARNING: --iso has no effect without --rebuild (it only controls what a fresh install uses); ignoring" >&2
+  usage_iso=""
+fi
+
+if [[ -z "${usage_iso:-}" && -f "$ISO_CACHE" ]]; then
+  usage_iso="$(cat "$ISO_CACHE")"
+fi
+
+ISO_MOUNT=""
+if [[ -n "${usage_iso:-}" ]]; then
+  if [[ ! -f "$usage_iso" ]]; then
+    echo "ERROR: ISO file not found: $usage_iso" >&2
+    exit 1
+  fi
+  usage_iso="$(realpath "$usage_iso")"
+  echo "$usage_iso" > "$ISO_CACHE"
+  # dockur/windows expects whatever custom ISO was used at install time to stay mounted
+  # on every subsequent boot, even after Windows is fully installed — otherwise it treats
+  # the install as broken, backs up the disk, and starts over. Caching the path and
+  # re-mounting it automatically on plain runs is what prevents that.
+  ISO_MOUNT="-v ${usage_iso}:/boot.iso"
+  echo "==> Using local ISO: $usage_iso"
+fi
+
+echo "==> Starting Windows Server 2022 VM..."
+echo "==> Open http://localhost:8006 in your browser to connect via noVNC"
+echo "==> RDP also available at localhost:3389"
+echo "==> First boot: Windows installs (~5 min), then install.bat runs (~10 min)"
+echo "==> On subsequent runs the VM resumes from saved state (much faster)"
+echo "==> Project is available at Z:\\ inside Windows"
+
+trap 'docker rm -f "$RUN_CONTAINER" 2>/dev/null || true' EXIT
+
+# shellcheck disable=SC2086
+docker run --rm -d \
+  --name "$RUN_CONTAINER" \
+  $KVM_FLAG \
+  $ISO_MOUNT \
+  --cap-add NET_ADMIN \
+  -p 2222:22 \
+  -p 8006:8006 \
+  -p 3389:3389 \
+  -e VERSION="win2025" \
+  -e RAM_SIZE="4G" \
+  -e CPU_CORES="4" \
+  -e DISK_SIZE="64G" \
+  -v "${VOLUME}:/storage" \
+  -v "${OEM_DIR}:/oem" \
+  -v "${PROJECT_ROOT}:/shared" \
+  dockurr/windows
+
+docker logs -f "$RUN_CONTAINER" &
+LOGS_PID=$!
+
+LOG_LINES_SHOWN=0
+if [[ ! -f "$SENTINEL" ]]; then
+  echo "==> First run: waiting for Windows setup to complete (~15 min)..."
+  until [[ -f "$SENTINEL" ]]; do
+    sleep 30
+    if [[ -f "$INSTALL_LOG" ]]; then
+      NEW_LINES="$(tail -n +$((LOG_LINES_SHOWN + 1)) "$INSTALL_LOG")"
+      LOG_LINES_SHOWN=$(wc -l < "$INSTALL_LOG")
+      if [[ -n "$NEW_LINES" ]]; then
+        echo "$NEW_LINES"
+      else
+        echo "    still waiting (no new lines in win-install.log)..."
+      fi
+    else
+      echo "    still waiting (Windows hasn't finished its own first-boot setup yet; install.bat hasn't started)..."
+    fi
+  done
+  echo "==> Setup complete."
+fi
+
+echo "==> Waiting for SSH to become available..."
+until ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 -p 2222 Docker@localhost "exit 0" 2>/dev/null; do
+  sleep 5
+  echo "    still waiting..."
+done
+
+kill "$LOGS_PID" 2>/dev/null || true
+wait "$LOGS_PID" 2>/dev/null || true
+
+echo "==> Connecting (project available at Z:\\)..."
+# net use's /persistent:yes only auto-restores for the account/session that created it
+# (install.bat runs as a different logon than the SSH session), so each new SSH session
+# needs its own remap; chaining it onto the remote command is simpler than fighting that.
+NET_USE_Z='net use Z: \\host.lan\Data /persistent:yes >nul 2>&1'
+case "$usage_shell" in
+  cmd)
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & cmd"
+    ;;
+  bash)
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby33-x64\\bin\\ridk.cmd exec bash"
+    ;;
+  *)
+    # ridk.ps1 is a separate script from ridk.cmd: PowerShell runs .ps1 files in-process
+    # (new scope, not a new process), so the $env:PATH etc. it sets via Invoke-Expression
+    # survive into the interactive prompt that -NoExit drops into afterward. Must reference
+    # the .ps1 explicitly — bare `ridk` would resolve to ridk.cmd, since .PS1 isn't in
+    # %PATHEXT% by default. No spaces in the path, so it doesn't need its own quoting.
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby33-x64\\bin\\ridk.ps1 enable\""
+    ;;
+esac
+
+# xfreerdp /v:localhost:3389 /u:Docker /p:admin /cert:ignore +clipboard /dynamic-resolution

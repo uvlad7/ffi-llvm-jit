@@ -410,6 +410,7 @@ module FFI
 
         if blocking
           params_store_fields = [*arg_types, *(ret_type unless void_ret)]
+          # Note: If StructByValue is ever supported we might want not to copy big structs and store a ptr instead
           params_store_t = LLVM.Struct(*params_store_fields) unless params_store_fields.empty?
           call_blocking_func = llvm_mod.functions.add(
             '', [VOID_PTR_T], VOID_PTR_T,

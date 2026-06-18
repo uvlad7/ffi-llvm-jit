@@ -11,10 +11,10 @@ if [[ -n "${usage_rebuild:-}" ]]; then
   docker rmi "$IMAGE" 2>/dev/null || true
 fi
 
-if ! docker image inspect "$IMAGE" &>/dev/null; then
-  echo "==> Registering QEMU binfmt handlers..."
-  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+echo "==> Registering QEMU binfmt handlers..."
+docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
+if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "==> Building cached image (first run only)..."
   trap 'docker rm -f "$CONTAINER_NAME" 2>/dev/null || true' EXIT
   docker run \
