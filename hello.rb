@@ -2,6 +2,7 @@
 # http://llvm.org/docs/LangRef.html#module-structure
 require 'llvm/core'
 require 'llvm/execution_engine'
+require_relative 'lib/ffi/llvm_jit/lljit'
 
 HELLO_STRING = "Hello, World!"
 
@@ -10,6 +11,13 @@ HELLO_STRING = "Hello, World!"
 mod = LLVM::Module.parse_bitcode(
         File.expand_path("lib/ffi/llvm_jit/llvm_bitcode.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__),
       )
+      LLVM::C.add_symbol(
+        'ffi_llvm_jit_save_errno',
+        FFI::DynamicLibrary.send(
+          :load_library, FFI::CURRENT_PROCESS, nil,
+        ).find_function('rbffi_save_errno'),
+      )
+
 
 # Declare the string constant as a global constant.
 hello = mod.globals.add(LLVM::ConstantArray.string(HELLO_STRING) , :hello) do |var|
@@ -39,7 +47,7 @@ main = mod.functions.add('main', [VALUE], LLVM::Int32) do |function, arg|
     slot = b.alloca VALUE, "slot"
     b.store arg, slot
     res = b.call rb_string_value_cstr, slot
-    b.ret zero
+    b.ret res
   end
 end
 
@@ -50,12 +58,15 @@ puts "------------------------------"
 puts 'init_jit'
 LLVM.init_jit
 
-puts 'JITCompiler'
-engine = LLVM::JITCompiler.new(mod, opt_level: 1)
+puts 'LLJit'
+engine = LLVM::LLJit.new
+engine.add_module(mod)
 puts 'function_address'
-puts engine.function_address(main.name)
-puts 'run_function'
+addr = engine.function_address(main.name)
+puts addr
+puts 'call'
 str = "Ooops"
-p engine.run_function(main, Fiddle.dlwrap(str))
+fn = Fiddle::Function.new(Fiddle::Pointer.new(addr), [Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT)
+p fn.call(Fiddle.dlwrap(str))
 puts 'dispose'
 engine.dispose
