@@ -14,6 +14,7 @@ on:
         type: boolean
         default: false
 
+# TODO: set CXX everywhere LLVM_CONFIG is set
 jobs:
   simple:
     runs-on: ${{ matrix.os }}
@@ -156,6 +157,10 @@ jobs:
             gemfile: 'llvm_19_1_6'
             default_clang: false
             label: 'Ruby 3.3, LLVM 19'
+          - os: ubuntu-24.04-riscv
+            gemfile: 'llvm_17_0_0'
+            default_clang: false
+            label: 'Ruby 3.3, LLVM 17'
 
     steps:
       - uses: actions/checkout@v4

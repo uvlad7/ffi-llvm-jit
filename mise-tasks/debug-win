@@ -2,6 +2,8 @@
 #MISE description="Spin up Windows Server 2022 VM (dockur/windows) for debugging ruby-llvm Windows install"
 #USAGE flag "--rebuild" help="Destroy persistent storage and start fresh"
 #USAGE flag "--iso <path>" help="Use a local Windows ISO instead of downloading; only valid combined with --rebuild (cached and auto-reused on later runs)"
+#USAGE flag "--backup" help="Back up the VM disk volume to a uniquely-named snapshot (debug-win-storage/backups/) and exit"
+#USAGE flag "--restore <name>" help="Restore the VM disk volume from a snapshot created by --backup, then exit"
 #USAGE flag "--shell <shell>" {
 #USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, or bash (MSYS2 and MINGW development toolchain, via ridk exec bash)"
 #USAGE   default "powershell"
@@ -17,7 +19,69 @@ SSH_KEY="${STORAGE_DIR}/win_ssh_key"
 SENTINEL="${STORAGE_DIR}/win-setup-done"
 INSTALL_LOG="${STORAGE_DIR}/win-install.log"
 ISO_CACHE="${STORAGE_DIR}/last-iso-path"
+BACKUP_DIR="${STORAGE_DIR}/backups"
 RUN_CONTAINER="ffi-llvm-jit-win-run-$$"
+
+if [[ -n "${usage_backup:-}" && -n "${usage_restore:-}" ]]; then
+  echo "ERROR: --backup and --restore cannot be used together" >&2
+  exit 1
+fi
+
+# Volume snapshots, taken via https://github.com/loomchild/volume-backup. Both
+# exit before any VM is started; the disk volume must not be in use, since a
+# live container writing to it would make the snapshot inconsistent. Alongside
+# the volume itself, a backup also bundles the host-side files that have to
+# stay consistent with it: the SSH keypair (the VM's authorized_keys was baked
+# in from this key at install time — a freshly-generated key won't match it),
+# the custom-ISO cache (dockur/windows wipes the disk and reinstalls if a
+# custom-ISO install ever boots without that same ISO mounted), and the setup
+# sentinel (otherwise a restored-but-already-set-up VM looks like a fresh
+# first-time install to the wait loop below).
+if [[ -n "${usage_backup:-}" ]]; then
+  if [[ -n "$(docker ps -q --filter volume="$VOLUME")" ]]; then
+    echo "ERROR: VM volume '$VOLUME' is in use by a running container; stop it first" >&2
+    exit 1
+  fi
+  name="$(date +%Y%m%d-%H%M%S)"
+  dest="${BACKUP_DIR}/${name}"
+  mkdir -p "$dest"
+  echo "==> Backing up volume '$VOLUME' to backups/${name}/volume.tar.bz2..."
+  docker run -v "${VOLUME}:/volume" --rm --log-driver none loomchild/volume-backup backup > "${dest}/volume.tar.bz2"
+  [[ -f "$SSH_KEY" ]] && cp -p "$SSH_KEY" "${dest}/win_ssh_key"
+  [[ -f "${SSH_KEY}.pub" ]] && cp -p "${SSH_KEY}.pub" "${dest}/win_ssh_key.pub"
+  [[ -f "$ISO_CACHE" ]] && cp -p "$ISO_CACHE" "${dest}/last-iso-path"
+  [[ -f "$SENTINEL" ]] && cp -p "$SENTINEL" "${dest}/win-setup-done"
+  [[ -f "$INSTALL_LOG" ]] && cp -p "$INSTALL_LOG" "${dest}/win-install.log"
+  echo "==> Backup saved as '${name}'. Restore with: --restore ${name}"
+  exit 0
+fi
+
+if [[ -n "${usage_restore:-}" ]]; then
+  src="${BACKUP_DIR}/${usage_restore}"
+  if [[ ! -f "${src}/volume.tar.bz2" ]]; then
+    echo "ERROR: Backup not found: ${src}/volume.tar.bz2" >&2
+    exit 1
+  fi
+  if [[ -n "$(docker ps -q --filter volume="$VOLUME")" ]]; then
+    echo "ERROR: VM volume '$VOLUME' is in use by a running container; stop it first" >&2
+    exit 1
+  fi
+  echo "==> Restoring volume '$VOLUME' from backups/${usage_restore}/volume.tar.bz2..."
+  # Wipe first: volume-backup's restore requires an empty target volume, and
+  # `docker run -v` below recreates it fresh (and empty) since it no longer exists.
+  docker volume rm "$VOLUME" >/dev/null 2>&1 || true
+  docker run -i -v "${VOLUME}:/volume" --rm loomchild/volume-backup restore < "${src}/volume.tar.bz2"
+  # Clear current host-side state before restoring the backup's copies, so
+  # nothing from the previous (now-overwritten) volume lingers inconsistently.
+  rm -f "$SSH_KEY" "${SSH_KEY}.pub" "$ISO_CACHE" "$SENTINEL" "$INSTALL_LOG"
+  [[ -f "${src}/win_ssh_key" ]] && cp -p "${src}/win_ssh_key" "$SSH_KEY"
+  [[ -f "${src}/win_ssh_key.pub" ]] && cp -p "${src}/win_ssh_key.pub" "${SSH_KEY}.pub"
+  [[ -f "${src}/last-iso-path" ]] && cp -p "${src}/last-iso-path" "$ISO_CACHE"
+  [[ -f "${src}/win-setup-done" ]] && cp -p "${src}/win-setup-done" "$SENTINEL"
+  [[ -f "${src}/win-install.log" ]] && cp -p "${src}/win-install.log" "$INSTALL_LOG"
+  echo "==> Restore complete. Run debug-win again (without --restore) to boot it."
+  exit 0
+fi
 
 if [[ -n "${usage_rebuild:-}" ]]; then
   docker volume rm "$VOLUME" 2>/dev/null || true
@@ -76,13 +140,35 @@ echo ==^> Installing Ruby 3.3 with DevKit (silent)... >> %LOG%
 "%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby33-x64" /components="ruby,rdoc,msys2" /tasks="modpath,assocfiles,noridkinstall" >> %LOG% 2>&1
 echo ==^> Initializing MSYS2 base, system update, and MINGW development toolchain (ridk install 1 2 3)... >> %LOG%
 call C:\Ruby33-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
-echo ==^> Installing LLVM via MSYS2... >> %LOG%
-call C:\Ruby33-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm' >> %LOG% 2>&1
+
+rem ruby-llvm hard-pins to LLVM 21.1.0 (lib/llvm/version.rb) and ext/llvm_bitcode
+rem needs a matching clang. MSYS2's normal "mingw-w64-ucrt-x86_64-llvm"/"-clang"
+rem packages are rolling-release and only ever track the latest major (now 22),
+rem so a regular pacman install of those would be the wrong version. Instead we
+rem use MSYS2's *versioned* side-by-side packages "-llvm-21"/"-clang-21": unlike
+rem the rolling packages, which overwrite ucrt64/bin directly, these install a
+rem self-contained copy (llvm-config.exe, clang.exe/clang++.exe, headers, .a libs)
+rem under ucrt64/opt/llvm-21/, so they coexist without conflicting with whatever
+rem the rolling package is at, and never get silently upgraded out from under us.
+echo ==^> Installing pinned LLVM/Clang 21 via MSYS2 (side-by-side, not the rolling llvm/clang package)... >> %LOG%
+call C:\Ruby33-x64\bin\ridk.cmd exec sh -c 'pacman -S --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm-21 $MINGW_PACKAGE_PREFIX-clang-21' >> %LOG% 2>&1
+
+rem llvm-config.exe is relocatable (self-locates relative to its own .exe path),
+rem so this works whether it's later invoked from ridk-enabled PowerShell, cmd,
+rem or bash. LLVM_CONFIG is what both ruby-llvm's Rakefile and
+rem ext/llvm_bitcode/extconf.rb look for first; CXX is what ruby-llvm's Rakefile
+rem uses to pick the C++ compiler it links the LLVM C API support lib with.
+rem setx /M (not `set`) so it's visible system-wide in later SSH sessions, not
+rem just inside install.bat's own process.
+set LLVM21_BIN=C:\Ruby33-x64\msys64\ucrt64\opt\llvm-21\bin
+echo ==^> Persisting LLVM_CONFIG/CXX for later gem/bundle installs... >> %LOG%
+setx LLVM_CONFIG "%LLVM21_BIN%\llvm-config.exe" /M >> %LOG% 2>&1
+setx CXX "%LLVM21_BIN%\clang++.exe" /M >> %LOG% 2>&1
 
 echo ==^> ruby version: >> %LOG%
 C:\Ruby33-x64\bin\ruby.exe --version >> %LOG% 2>&1
-echo ==^> llvm version: >> %LOG%
-call C:\Ruby33-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
+echo ==^> llvm-21 version (pinned, used by ruby-llvm / ext/llvm_bitcode): >> %LOG%
+"%LLVM21_BIN%\llvm-config.exe" --version >> %LOG% 2>&1
 
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
@@ -122,11 +208,11 @@ fi
 
 ISO_MOUNT=""
 if [[ -n "${usage_iso:-}" ]]; then
+  usage_iso="$(realpath "$usage_iso")"
   if [[ ! -f "$usage_iso" ]]; then
     echo "ERROR: ISO file not found: $usage_iso" >&2
     exit 1
   fi
-  usage_iso="$(realpath "$usage_iso")"
   echo "$usage_iso" > "$ISO_CACHE"
   # dockur/windows expects whatever custom ISO was used at install time to stay mounted
   # on every subsequent boot, even after Windows is fully installed — otherwise it treats
