@@ -140,35 +140,13 @@ echo ==^> Installing Ruby 3.3 with DevKit (silent)... >> %LOG%
 "%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby33-x64" /components="ruby,rdoc,msys2" /tasks="modpath,assocfiles,noridkinstall" >> %LOG% 2>&1
 echo ==^> Initializing MSYS2 base, system update, and MINGW development toolchain (ridk install 1 2 3)... >> %LOG%
 call C:\Ruby33-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
-
-rem ruby-llvm hard-pins to LLVM 21.1.0 (lib/llvm/version.rb) and ext/llvm_bitcode
-rem needs a matching clang. MSYS2's normal "mingw-w64-ucrt-x86_64-llvm"/"-clang"
-rem packages are rolling-release and only ever track the latest major (now 22),
-rem so a regular pacman install of those would be the wrong version. Instead we
-rem use MSYS2's *versioned* side-by-side packages "-llvm-21"/"-clang-21": unlike
-rem the rolling packages, which overwrite ucrt64/bin directly, these install a
-rem self-contained copy (llvm-config.exe, clang.exe/clang++.exe, headers, .a libs)
-rem under ucrt64/opt/llvm-21/, so they coexist without conflicting with whatever
-rem the rolling package is at, and never get silently upgraded out from under us.
-echo ==^> Installing pinned LLVM/Clang 21 via MSYS2 (side-by-side, not the rolling llvm/clang package)... >> %LOG%
-call C:\Ruby33-x64\bin\ridk.cmd exec sh -c 'pacman -S --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm-21 $MINGW_PACKAGE_PREFIX-clang-21' >> %LOG% 2>&1
-
-rem llvm-config.exe is relocatable (self-locates relative to its own .exe path),
-rem so this works whether it's later invoked from ridk-enabled PowerShell, cmd,
-rem or bash. LLVM_CONFIG is what both ruby-llvm's Rakefile and
-rem ext/llvm_bitcode/extconf.rb look for first; CXX is what ruby-llvm's Rakefile
-rem uses to pick the C++ compiler it links the LLVM C API support lib with.
-rem setx /M (not `set`) so it's visible system-wide in later SSH sessions, not
-rem just inside install.bat's own process.
-set LLVM21_BIN=C:\Ruby33-x64\msys64\ucrt64\opt\llvm-21\bin
-echo ==^> Persisting LLVM_CONFIG/CXX for later gem/bundle installs... >> %LOG%
-setx LLVM_CONFIG "%LLVM21_BIN%\llvm-config.exe" /M >> %LOG% 2>&1
-setx CXX "%LLVM21_BIN%\clang++.exe" /M >> %LOG% 2>&1
+echo ==^> Installing LLVM via MSYS2... >> %LOG%
+call C:\Ruby33-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm' >> %LOG% 2>&1
 
 echo ==^> ruby version: >> %LOG%
 C:\Ruby33-x64\bin\ruby.exe --version >> %LOG% 2>&1
-echo ==^> llvm-21 version (pinned, used by ruby-llvm / ext/llvm_bitcode): >> %LOG%
-"%LLVM21_BIN%\llvm-config.exe" --version >> %LOG% 2>&1
+echo ==^> llvm version: >> %LOG%
+call C:\Ruby33-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
 
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
