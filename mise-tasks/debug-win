@@ -134,19 +134,19 @@ mkdir C:\ProgramData\ssh 2>nul
 copy "%~dp0authorized_keys" C:\ProgramData\ssh\administrators_authorized_keys >> %LOG% 2>&1
 powershell -Command "icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant '*S-1-5-18:(F)' /grant '*S-1-5-32-544:(F)'; Restart-Service sshd" >> %LOG% 2>&1
 
-echo ==^> Downloading RubyInstaller 3.3.8 with DevKit... >> %LOG%
-curl -L --retry 3 -o "%TEMP%\rubyinstaller.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.3.8-1/rubyinstaller-devkit-3.3.8-1-x64.exe" >> %LOG% 2>&1
-echo ==^> Installing Ruby 3.3 with DevKit (silent)... >> %LOG%
-"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby33-x64" /components="ruby,rdoc,msys2" /tasks="modpath,assocfiles,noridkinstall" >> %LOG% 2>&1
+echo ==^> Downloading RubyInstaller 3.4.9 with DevKit... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\rubyinstaller.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.4.9-1/rubyinstaller-devkit-3.4.9-1-x64.exe" >> %LOG% 2>&1
+echo ==^> Installing Ruby 3.4 with DevKit (silent)... >> %LOG%
+"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby34-x64" /components="ruby,rdoc,msys2" /tasks="modpath,assocfiles,noridkinstall" >> %LOG% 2>&1
 echo ==^> Initializing MSYS2 base, system update, and MINGW development toolchain (ridk install 1 2 3)... >> %LOG%
-call C:\Ruby33-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
+call C:\Ruby34-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
 echo ==^> Installing LLVM via MSYS2... >> %LOG%
-call C:\Ruby33-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm' >> %LOG% 2>&1
+call C:\Ruby34-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm' >> %LOG% 2>&1
 
 echo ==^> ruby version: >> %LOG%
-C:\Ruby33-x64\bin\ruby.exe --version >> %LOG% 2>&1
+C:\Ruby34-x64\bin\ruby.exe --version >> %LOG% 2>&1
 echo ==^> llvm version: >> %LOG%
-call C:\Ruby33-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
+call C:\Ruby34-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
 
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
@@ -162,11 +162,13 @@ echo ==^> install.bat finished. >> %LOG%
 echo done > Z:\mise-tasks\debug-win-storage\win-setup-done
 ENDBAT
 
+# `pacman -Sy` (sync only) vs `-Syu` (sync+upgrade) — `-Sy` alone caused a real dependency conflict (`mingw-w64-ucrt-x86_64-gcc-libs` version pin) when installing `mingw-w64-ucrt-x86_64-llvm`; fixed with `-Syu`
+
 # echo ==^> Running bundle install for Windows gemfile... >> %LOG%
 # cd /d Z:\
 # set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-win
-# C:\Ruby33-x64\bin\bundle config set --global without development >> %LOG% 2>&1
-# C:\Ruby33-x64\bin\bundle install >> %LOG% 2>&1
+# C:\Ruby34-x64\bin\bundle config set --global without development >> %LOG% 2>&1
+# C:\Ruby34-x64\bin\bundle install >> %LOG% 2>&1
 
 KVM_FLAG=""
 if [[ -e /dev/kvm ]]; then
@@ -269,7 +271,7 @@ case "$usage_shell" in
     ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & cmd"
     ;;
   bash)
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby33-x64\\bin\\ridk.cmd exec bash"
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby34-x64\\bin\\ridk.cmd exec bash"
     ;;
   *)
     # ridk.ps1 is a separate script from ridk.cmd: PowerShell runs .ps1 files in-process
@@ -277,7 +279,7 @@ case "$usage_shell" in
     # survive into the interactive prompt that -NoExit drops into afterward. Must reference
     # the .ps1 explicitly — bare `ridk` would resolve to ridk.cmd, since .PS1 isn't in
     # %PATHEXT% by default. No spaces in the path, so it doesn't need its own quoting.
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby33-x64\\bin\\ridk.ps1 enable\""
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby34-x64\\bin\\ridk.ps1 enable\""
     ;;
 esac
 
