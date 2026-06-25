@@ -84,6 +84,13 @@ if [[ -n "${usage_restore:-}" ]]; then
 fi
 
 if [[ -n "${usage_rebuild:-}" ]]; then
+  echo "WARNING: --rebuild destroys Docker volume '$VOLUME' and all VM data." >&2
+  echo "         A full Windows reinstall (~15 min) will be required." >&2
+  read -r -p "Type 'yes' to confirm: " _rebuild_confirm
+  if [[ "$_rebuild_confirm" != "yes" ]]; then
+    echo "Aborted." >&2
+    exit 1
+  fi
   docker volume rm "$VOLUME" 2>/dev/null || true
   rm -f "$SENTINEL" "$INSTALL_LOG" "$ISO_CACHE"
 fi
