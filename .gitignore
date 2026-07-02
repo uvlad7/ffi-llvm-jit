@@ -9,6 +9,7 @@
 /mise-tasks/debug-win-storage/
 *.bundle
 *.so
+*.dll
 *.bc
 *.o
 *.a

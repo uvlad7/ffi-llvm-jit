@@ -29,6 +29,7 @@ RbConfig::MAKEFILE_CONFIG['LDSHARED'] =
 
 # required to push flags without checking
 $CFLAGS << ' -emit-llvm -c -Werror=implicit-function-declaration ' # rubocop:disable Style/GlobalVars
+$CFLAGS << ' -DFFI_LLVM_JIT_WIN_PLATFORM -fno-stack-protector ' if Gem.win_platform? # rubocop:disable Style/GlobalVars
 
 # MakeMakefile::COMPILE_C = config_string('COMPILE_C') ||
 #   '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG) -c $(CSRCFLAG)$<'

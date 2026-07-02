@@ -3,12 +3,22 @@
 require 'io/nonblock'
 
 RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
+  let(:ffi_libs) do
+    spec_ext = File.absolute_path(FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './ext/ffi_llvm_jit_spec'))
+    if Gem.win_platform?
+      [FFI::Library::LIBC, spec_ext, 'msvcrt', 'kernel32']
+    else
+      [FFI::Library::LIBC, spec_ext, 'm']
+    end
+  end
+
   let(:jitlib) do
     Module.new.tap do |mod|
       mod.extend described_class::Library
-      mod.ffi_lib FFI::Library::LIBC, FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './ext/ffi_llvm_jit_spec'), 'm'
+      mod.ffi_lib(*ffi_libs)
 
       mod.yolo!
+      # mod.singleton_class.alias_method :attach_llvm_jit_function, :attach_function
       mod.attach_llvm_jit_function :strlen, [:string], :size_t
     end
   end
@@ -17,7 +27,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     Module.new.tap do |mod|
       mod.extend described_class::Library
       mod.ffi_convention :stdcall
-      mod.ffi_lib FFI::Library::LIBC, FFI::Compiler::Loader.find('ffi_llvm_jit_spec', './ext/ffi_llvm_jit_spec'), 'm'
+      mod.ffi_lib(*ffi_libs)
     end
   end
 
@@ -131,7 +141,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
   it 'supports multiple args' do
     expect(jitlib.attach_llvm_jit_function(:strcmp, %i[string string], :int)).to be_nil
-    expect(jitlib.attach_llvm_jit_function(:strcasecmp, %i[string string], :int)).to be_nil
+    expect(jitlib.attach_llvm_jit_function(:strcasecmp, (Gem.win_platform? ? :_stricmp : :strcasecmp), %i[string string], :int)).to be_nil
     expect(jitlib.strcmp('a', 'b')).to be < 1
     expect(jitlib.strcmp('ABBA', 'abBA')).to be < 1
     expect(jitlib.strcasecmp('ABBA', 'abBA')).to be 0
@@ -139,7 +149,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
   it 'handles name clashes' do
     jitlib.attach_llvm_jit_function(:strcmp, %i[string string], :int)
-    jitlib.attach_llvm_jit_function(:strcmp, :strcasecmp, %i[string string], :int)
+    jitlib.attach_llvm_jit_function(:strcmp, (Gem.win_platform? ? :_stricmp : :strcasecmp), %i[string string], :int)
     expect(jitlib.strcmp('ABBA', 'abBA')).to be 0
   end
 
@@ -191,6 +201,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'works across forks' do
+    skip "Process.fork doesn't exist" unless Process.respond_to?(:fork)
+
     read, write = IO.pipe
     lib = jitlib
     pid = Process.fork do
@@ -205,6 +217,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it "doesn't allow attaching new functions after fork" do
+    skip "Process.fork doesn't exist" unless Process.respond_to?(:fork)
+
     read, write = IO.pipe
     pid = Process.fork do
       read.close
@@ -223,6 +237,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno' do
+    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+
     jitlib.attach_llvm_jit_function :strtol, %i[string string int], :long
     FFI.errno = 0
     long_max = (2**((FFI.type_size(:long) * 8) - 1)) - 1
@@ -234,6 +250,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno in blocking calls' do
+    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+
     jitlib.attach_llvm_jit_function :strtoul, %i[string string int], :ulong
     FFI.errno = 0
     ulong_max = (2**(FFI.type_size(:long) * 8)) - 1
@@ -245,6 +263,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno in interrupted blocking call (sleep)' do
+    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+
     jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true
 
     thread = Thread.new do
@@ -261,6 +281,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno in interrupted blocking call (read)' do
+    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+
     jitlib.attach_llvm_jit_function :read_jit, :read, %i[int string size_t], :ssize_t, blocking: true
 
     read_io, = IO.pipe
@@ -387,6 +409,8 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'supports blocking calls (sleep)' do
+    skip 'POSIX sleep() not available on Windows' if Gem.win_platform?
+
     # sleep(seconds) takes a uint, returns uint (seconds remaining); safe to use as a long-running blocker
     jitlib.attach_llvm_jit_function :sleep_jit, :sleep, [:uint], :uint, blocking: true
     expect(jitlib.sleep_jit(0)).to eq(0)
@@ -404,7 +428,44 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect { thread.value }.to raise_error(RuntimeError, 'Ooops')
   end
 
+  it 'supports blocking calls (SleepEx)' do
+    skip 'Windows only' unless Gem.win_platform?
+
+    # kill/raise don't interrupt SleepEx with the default UBF on Windows
+    # (matches regular FFI behaviour). GVL release is verified via thread.stop?.
+    # Threads are woken for cleanup via QueueUserAPC (not used in the production UBF).
+    jitlib.attach_llvm_jit_function :sleep_jit, :SleepEx, %i[uint int], :uint, blocking: true
+    expect(jitlib.sleep_jit(0, 0)).to eq(0)
+
+    jitlib.attach_function :open_thread, :OpenThread, %i[uint int uint], :pointer
+    jitlib.attach_function :queue_user_apc, :QueueUserAPC, %i[pointer pointer ulong_long], :uint
+    jitlib.attach_function :close_handle, :CloseHandle, [:pointer], :int
+    wake_apc = FFI::Function.new(:void, [:ulong_long]) {}
+    wake = ->(t) do
+      h = jitlib.open_thread(0x0010, 0, t.native_thread_id) # THREAD_SET_CONTEXT
+      jitlib.queue_user_apc(wake_apc, h, 0)
+      jitlib.close_handle(h)
+    end
+
+    thread = Thread.new { jitlib.sleep_jit(3_600_000, 1) }
+    sleep(0.1) until thread.stop?
+    thread.kill
+    expect(thread.status).to eq('sleep')
+    wake.(thread)
+    expect(thread.value).to be_nil
+
+    thread = Thread.new { jitlib.sleep_jit(3_600_000, 1) }
+    thread.report_on_exception = false
+    sleep(0.1) until thread.stop?
+    thread.raise('Ooops')
+    expect(thread.status).to eq('sleep')
+    wake.(thread)
+    expect { thread.value }.to raise_error(RuntimeError, 'Ooops')
+  end
+
   it 'supports blocking calls (read)' do
+    skip 'read() not available on Windows; _read() not interruptible' if Gem.win_platform?
+
     jitlib.attach_llvm_jit_function :read_jit, :read, %i[int string size_t], :ssize_t, blocking: true
     read_io, write_io = IO.pipe
     read_io.nonblock = false

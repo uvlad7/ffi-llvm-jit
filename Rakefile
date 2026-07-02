@@ -36,11 +36,12 @@ GEMSPEC.extensions.each do |extension|
   end
 end
 
-namespace 'spec_compile' do
+namespace 'spec_compile_namespace' do
   require 'ffi-compiler/compile_task'
   FFI::Compiler::CompileTask.new('spec/ext/ffi_llvm_jit_spec/ffi_llvm_jit_spec')
 end
-task spec: 'spec_compile:default'
+task compile_spec: 'spec_compile_namespace:default'
+task spec: :compile_spec
 
 task spec: :compile
 
@@ -48,7 +49,7 @@ task default: %i[clobber compile spec rubocop yard]
 
 # Similar to https://gist.github.com/tenderworks/f4cbb60f2c0dc3ab334eb73fec36f702
 # rubocop:disable Metrics/BlockLength, Style/Documentation, Lint/ConstantDefinitionInBlock, Naming/MethodParameterName
-task bench: [:compile, 'spec_compile:default'] do
+task bench: [:compile, :compile_spec] do
   require 'ffi'
   require 'benchmark/ips'
   require 'strlen'
