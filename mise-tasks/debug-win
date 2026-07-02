@@ -171,6 +171,7 @@ ENDBAT
 
 # `pacman -Sy` (sync only) vs `-Syu` (sync+upgrade) — `-Sy` alone caused a real dependency conflict (`mingw-w64-ucrt-x86_64-gcc-libs` version pin) when installing `mingw-w64-ucrt-x86_64-llvm`; fixed with `-Syu`
 
+# todo - clang
 # echo ==^> Running bundle install for Windows gemfile... >> %LOG%
 # cd /d Z:\
 # set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-win
@@ -267,7 +268,7 @@ done
 
 kill "$LOGS_PID" 2>/dev/null || true
 wait "$LOGS_PID" 2>/dev/null || true
-
+# TODO: cd into /z automatcially
 echo "==> Connecting (project available at Z:\\)..."
 # net use's /persistent:yes only auto-restores for the account/session that created it
 # (install.bat runs as a different logon than the SSH session), so each new SSH session

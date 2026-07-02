@@ -62,12 +62,20 @@ module FFI
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
-      LLVM::C.add_symbol(
-        'ffi_llvm_jit_save_errno',
-        FFI::DynamicLibrary.send(
-          :load_library, FFI::CURRENT_PROCESS, nil,
-        ).find_function('rbffi_save_errno'),
-      )
+      #
+      # On Windows, ffi_llvm_jit_save_errno is excluded from the bitcode at
+      # compile time (FFI_LLVM_JIT_WIN_PLATFORM define in the extconf) because
+      # rbffi_save_errno is not exported from ffi_c.dll, so there is no address
+      # to register. FFI.errno is therefore unsupported on Windows until
+      # rbffi_save_errno is exported (pending in the ffi fork).
+      unless Gem.win_platform?
+        LLVM::C.add_symbol(
+          'ffi_llvm_jit_save_errno',
+          FFI::DynamicLibrary.send(
+            :load_library, FFI::CURRENT_PROCESS, nil,
+          ).find_function('rbffi_save_errno'),
+        )
+      end
 
       LLVM.init_jit
 
@@ -80,6 +88,15 @@ module FFI
       LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
       LLVM_MUTEX = Mutex.new
 
+      # Future: register kernel32 symbols for the APC-based UBF — see llvm_bitcode.c.
+      # if Gem.win_platform?
+      #   k32 = FFI::DynamicLibrary.open('kernel32', FFI::DynamicLibrary::RTLD_LAZY)
+      #   %w[OpenThread QueueUserAPC CloseHandle GetCurrentThreadId].each do |sym|
+      #     addr = k32.find_function(sym)
+      #     LLVM::C.add_symbol(sym, addr) if addr && !addr.null?
+      #   end
+      # end
+
       # Validate all external declarations in the bitcode module are resolved.
       # LLVM intrinsics (llvm.*) are handled natively by the JIT and not in the symbol table.
       unresolved = LLVM_MOD.functions.select do |f|
@@ -87,6 +104,24 @@ module FFI
           LLVM::C.search_for_address_of_symbol(f.name).null?
       end
       raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
+
+      # On Windows (COFF), RuntimeDyldCOFF does not use lazy PLT stubs for
+      # unresolved cross-module references. If LLVM_MOD is not yet compiled
+      # when a llvm_mod wrapper is finalized, its references to bitcode
+      # functions (ffi_llvm_jit_value_to_string etc.) resolve to address 0,
+      # causing a segfault on first call. Pre-compile and register all symbols.
+      if Gem.win_platform?
+        LLVM::C.load_library_permanently(nil)
+        LLVM_MOD.functions.reject { |f| f.declaration?.nonzero? }.each do |f|
+          addr = LLVM_ENG.function_address(f.name)
+          LLVM::C.add_symbol(f.name, FFI::Pointer.new(addr)) unless addr.zero?
+        end
+        qnil_glob = LLVM_MOD.globals['ffi_llvm_jit_Qnil']
+        if qnil_glob
+          qnil_ptr = LLVM_ENG.pointer_to_global(qnil_glob)
+          LLVM::C.add_symbol('ffi_llvm_jit_Qnil', qnil_ptr) unless qnil_ptr.null?
+        end
+      end
 
       private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX, :LLVM_TRIPLE
 
@@ -201,6 +236,7 @@ module FFI
         # riscv is confirmed to segfault
         # you still can set @yolo yourself if you are feeling lucky
         # YOLO!
+        # TODO, todo
         @yolo = true unless LLVM_TRIPLE[0] =~ /riscv/
       end
 
@@ -273,6 +309,7 @@ module FFI
       end
 
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
+        # raise UnsupportedErrror, 'FFI.errno is unsupported on Windows' if Gem.win_platform? && !@i_dont_use_errno_i_promise
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
         # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless @yolo ||
@@ -463,7 +500,7 @@ module FFI
                     )
                   end
             # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
-            builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno'))
+            builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless Gem.win_platform?
             # In FFI it's also used to re-raise from callbacks, but here it's only for blocking calls
             if blocking
               builder.call(

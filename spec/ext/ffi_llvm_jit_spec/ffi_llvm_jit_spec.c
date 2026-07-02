@@ -71,3 +71,24 @@ unsigned long int factorial(unsigned int n) {
         return n * factorial(n - 1);
     }
 }
+
+// When called as a JIT blocking call (blocking: true), this runs inside
+// rb_thread_call_without_gvl. Calling an FFI::Function callback from there
+// triggers FFI's trampoline → rb_thread_call_with_gvl → blocking_region_end
+// → rb_thread_check_ints, which processes any pending thread.raise interrupt.
+// Used by spec/gvl_reentry_repro.rb to reproduce the exception-propagation
+// bug cross-platform (no APC / Windows-specific code required).
+void spec_spin_callback(uint64_t cb_addr, uint64_t data_addr, uint32_t iterations) {
+    void (*cb)(uint64_t) = (void (*)(uint64_t)) (uintptr_t) cb_addr;
+    for (uint32_t i = 0; i < iterations; i++) {
+        cb(data_addr);
+    }
+}
+
+// Calls cb(data) exactly once, synchronously, and returns the callback's result.
+// Used to test whether an exception raised inside a callback propagates back to
+// the caller (vs. the async thread.raise path tested by spec_spin_callback).
+uint64_t spec_invoke_callback(uint64_t cb_addr, uint64_t data_addr) {
+    uint64_t (*cb)(uint64_t) = (uint64_t (*)(uint64_t)) (uintptr_t) cb_addr;
+    return cb(data_addr);
+}

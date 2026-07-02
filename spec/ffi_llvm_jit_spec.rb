@@ -14,11 +14,13 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
 
   let(:jitlib) do
     Module.new.tap do |mod|
-      mod.extend described_class::Library
-      mod.ffi_lib(*ffi_libs)
-
-      mod.yolo!
+      # mod.extend FFI::Library
       # mod.singleton_class.alias_method :attach_llvm_jit_function, :attach_function
+
+      mod.extend described_class::Library
+      mod.yolo!
+
+      mod.ffi_lib(*ffi_libs)
       mod.attach_llvm_jit_function :strlen, [:string], :size_t
     end
   end
@@ -440,7 +442,18 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     jitlib.attach_function :open_thread, :OpenThread, %i[uint int uint], :pointer
     jitlib.attach_function :queue_user_apc, :QueueUserAPC, %i[pointer pointer ulong_long], :uint
     jitlib.attach_function :close_handle, :CloseHandle, [:pointer], :int
-    wake_apc = FFI::Function.new(:void, [:ulong_long]) {}
+    # Native no-op APC: spec_blocking_void_ret_void_param takes no args; on
+    # x64 Windows the APC's ULONG_PTR arrives in RCX which the function
+    # simply ignores.  Using an FFI::Function here would invoke
+    # rb_thread_call_with_gvl from the APC context — Ruby callback code
+    # runs while SleepEx has not yet returned to the caller.  Empirically
+    # (spec/win_raise_repro.rb) the JIT's exception propagation path
+    # (rb_rescue2 → exc_store → raise_exception) then fails to deliver
+    # thread.raise, even though regular FFI succeeds in the same scenario.
+    # A native callback makes no Ruby calls, so SleepEx returns cleanly
+    # first and the interrupt is processed by rb_thread_call_without_gvl's
+    # own blocking_region_end.
+    wake_apc = jitlib.attach_function :spec_blocking_void_ret_void_param, [], :void
     wake = ->(t) do
       h = jitlib.open_thread(0x0010, 0, t.native_thread_id) # THREAD_SET_CONTEXT
       jitlib.queue_user_apc(wake_apc, h, 0)

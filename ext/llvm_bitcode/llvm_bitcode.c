@@ -187,11 +187,55 @@ typedef struct
     void *params_store;
 } ffi_llvm_jit_blocking_call_t;
 
+// Future: Windows-specific UBF for interruptible blocking calls.
+//
+// Ruby's default UBF on Windows (ubf_handle in thread_win32.c) calls
+// SetEvent(th->nt->interrupt_event), which is only checked while the thread
+// is waiting in Ruby's own WaitForMultipleObjects() loop.  Kernel-mode
+// blocking calls (SleepEx, ReadFile, recv, ...) are not affected at all.
+//
+// Possible per-call-type UBF mechanisms:
+//   1. QueueUserAPC — for alertable waits: SleepEx(ms, TRUE),
+//      WaitForSingleObjectEx/WaitForMultipleObjectsEx with bAlertable=TRUE.
+//      Queue a no-op APC; the OS delivers it and the alertable wait returns
+//      WAIT_IO_COMPLETION.  Requires OpenThread(THREAD_SET_CONTEXT, ...).
+//
+//   2. CancelIoEx(handle, NULL) — for overlapped I/O: ReadFile/WriteFile on
+//      files, pipes, and sockets opened with FILE_FLAG_OVERLAPPED.
+//      Causes the pending I/O to complete with ERROR_OPERATION_ABORTED.
+//      Requires the Win32 HANDLE (not the CRT fd) for the operation.
+//
+//   3. SetEvent + custom wait — wrap any blocking call in
+//      WaitForMultipleObjects([io_event, cancel_event], ...) and signal
+//      cancel_event from the UBF.  Works for anything that can be made
+//      event-driven, at the cost of a wrapper layer.
+//
+// To enable approach (1): uncomment below, add #include <windows.h> to the
+// header, and register OpenThread/QueueUserAPC/CloseHandle/GetCurrentThreadId
+// from kernel32 in llvm_jit.rb (see commented block there).
+// This intentionally diverges from regular FFI which uses the same default
+// UBF and therefore also cannot interrupt kernel-mode blocking calls.
+//
+// #ifdef FFI_LLVM_JIT_WIN_PLATFORM
+// VALUE
+// ffi_llvm_jit_blocking_call(VALUE data)
+// {
+//     ffi_llvm_jit_blocking_call_t* call_data = (ffi_llvm_jit_blocking_call_t *) data;
+//     HANDLE th = OpenThread(THREAD_SET_CONTEXT, FALSE, GetCurrentThreadId());
+//     rb_thread_call_without_gvl(call_data->call_blocking_function_fn, call_data->params_store,
+//                                 ffi_llvm_jit_win32_ubf, th);
+//     CloseHandle(th);
+//     return Qnil;
+// }
+// #else
+
 VALUE
 ffi_llvm_jit_blocking_call(VALUE data)
 {
     ffi_llvm_jit_blocking_call_t* call_data = (ffi_llvm_jit_blocking_call_t *) data;
-    rb_thread_call_without_gvl(call_data->call_blocking_function_fn, call_data->params_store, (rb_unblock_function_t *)-1, NULL);
-
+    rb_thread_call_without_gvl(call_data->call_blocking_function_fn, call_data->params_store,
+                                (rb_unblock_function_t *)-1, NULL);
     return Qnil;
 }
+
+// #endif
