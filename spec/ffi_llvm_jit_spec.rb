@@ -442,17 +442,6 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     jitlib.attach_function :open_thread, :OpenThread, %i[uint int uint], :pointer
     jitlib.attach_function :queue_user_apc, :QueueUserAPC, %i[pointer pointer ulong_long], :uint
     jitlib.attach_function :close_handle, :CloseHandle, [:pointer], :int
-    # Native no-op APC: spec_blocking_void_ret_void_param takes no args; on
-    # x64 Windows the APC's ULONG_PTR arrives in RCX which the function
-    # simply ignores.  Using an FFI::Function here would invoke
-    # rb_thread_call_with_gvl from the APC context — Ruby callback code
-    # runs while SleepEx has not yet returned to the caller.  Empirically
-    # (spec/win_raise_repro.rb) the JIT's exception propagation path
-    # (rb_rescue2 → exc_store → raise_exception) then fails to deliver
-    # thread.raise, even though regular FFI succeeds in the same scenario.
-    # A native callback makes no Ruby calls, so SleepEx returns cleanly
-    # first and the interrupt is processed by rb_thread_call_without_gvl's
-    # own blocking_region_end.
     wake_apc = jitlib.attach_function :spec_blocking_void_ret_void_param, [], :void
     wake = ->(t) do
       h = jitlib.open_thread(0x0010, 0, t.native_thread_id) # THREAD_SET_CONTEXT
@@ -507,6 +496,140 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_blocking_void_ret(1)).to be_nil
     expect(jitlib.spec_blocking_void_param).to eq(42)
     expect(jitlib.spec_blocking_void_ret_void_param).to be_nil
+  end
+
+  # Helper: a plain FFI module against the same native libraries.
+  let(:plain_ffi) do
+    Module.new.tap do |mod|
+      mod.extend FFI::Library
+      mod.ffi_lib(*ffi_libs)
+    end
+  end
+
+  it 'propagates exceptions raised in callbacks' do
+    # spec_store_callback is called via plain FFI (JIT does not support pointer params yet).
+    # spec_invoke_stored_callback is called via both FFI and JIT to compare behaviour.
+    plain_ffi.attach_function :spec_store_callback, [:uint64], :void
+    plain_ffi.attach_function :spec_invoke_stored_callback, [:uint64], :uint64, blocking: true
+    plain_ffi.attach_function :spec_invoke_stored_callback_nonblocking,
+                              :spec_invoke_stored_callback, [:uint64], :uint64
+    jitlib.attach_llvm_jit_function :spec_invoke_stored_callback, [:uint64], :uint64, blocking: true
+    jitlib.attach_llvm_jit_function :spec_invoke_stored_callback_nonblocking,
+                                    :spec_invoke_stored_callback, [:uint64], :uint64
+
+    cb = FFI::Function.new(:uint64, [:uint64]) { |_| raise 'boom' }
+    plain_ffi.spec_store_callback(cb.to_i)
+
+    expect { plain_ffi.spec_invoke_stored_callback(0) }.to raise_error(RuntimeError, 'boom')
+    expect { plain_ffi.spec_invoke_stored_callback_nonblocking(0) }.to raise_error(RuntimeError, 'boom')
+
+    if Gem.win_platform?
+      # Not supported on windows
+      expect(jitlib.spec_invoke_stored_callback(0)).to eq(0)
+      expect(jitlib.spec_invoke_stored_callback_nonblocking(0)).to eq(0)
+    else
+      expect { jitlib.spec_invoke_stored_callback(0) }.to raise_error(RuntimeError, 'boom')
+      expect { jitlib.spec_invoke_stored_callback_nonblocking(0) }.to raise_error(RuntimeError, 'boom')
+    end
+  end
+
+  it 'supports no_reraise option' do
+    jitlib.attach_llvm_jit_function :spec_converter, [:int], :int, no_reraise: true
+    expect(jitlib.spec_converter(5)).to eq(-5)
+
+    cb = FFI::Function.new(:uint64, [:uint64]) { |_| raise 'boom' }
+    plain_ffi.attach_function :spec_store_callback, [:uint64], :void
+    plain_ffi.spec_store_callback(cb.to_i)
+    jitlib.attach_llvm_jit_function :spec_invoke_stored_callback, [:uint64], :uint64, no_reraise: true
+    expect { jitlib.spec_invoke_stored_callback(0) }.not_to raise_error
+  end
+
+  it 'still terminates thread on thread.kill with no_reraise' do
+    jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true, no_reraise: true
+
+    continued = false
+    t = Thread.new do
+      jitlib.sleep_jit(3600)
+      continued = true
+    end
+    sleep(0.1) until t.stop?
+    t.kill
+    t.join
+    expect(continued).to be(false)
+  end
+
+  it 'drops thread.raise in no_reraise blocking calls' do
+    jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true, no_reraise: true
+
+    continued = false
+    t = Thread.new do
+      jitlib.sleep_jit(3600)
+      continued = true
+    end
+    sleep(0.1) until t.stop?
+    t.raise 'interrupt'
+    t.join
+    expect(continued).to be(true)
+  end
+
+  it 'callback exception from inside no_reraise call leaks into enclosing frame' do
+    plain_ffi.attach_function :spec_store_callback, [:uint64], :void
+
+    jitlib.attach_llvm_jit_function :invoke_outer, :spec_invoke_stored_callback, [:uint64], :uint64
+    jitlib.attach_llvm_jit_function :invoke_inner, :spec_invoke_stored_callback, [:uint64], :uint64, no_reraise: true
+
+    inner_cb = FFI::Function.new(:uint64, [:uint64]) { |_| raise 'inner boom' }
+
+    outer_cb = FFI::Function.new(:uint64, [:uint64]) do |_|
+      plain_ffi.spec_store_callback(inner_cb.to_i)
+      jitlib.invoke_inner(0)
+      0
+    end
+
+    plain_ffi.spec_store_callback(outer_cb.to_i)
+    expect { jitlib.invoke_outer(0) }.to raise_error(RuntimeError, 'inner boom')
+  end
+
+  it 'supports ignore_errno option' do
+    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+
+    long_max = (2**((FFI.type_size(:long) * 8) - 1)) - 1
+    overflow_input = '42' * 10
+
+    jitlib.attach_llvm_jit_function :strtol_tracked, :strtol, %i[string string int], :long
+    jitlib.attach_llvm_jit_function :strtol, %i[string string int], :long, ignore_errno: true
+
+    expect(jitlib.strtol_tracked(overflow_input, nil, 10)).to eq(long_max)
+    expect(FFI.errno).to eq(Errno::ERANGE::Errno)
+
+    # FFI.errno= sets C errno; then a successful tracked call saves that 0 into the stored value
+    FFI.errno = 0
+    jitlib.strtol_tracked('42', nil, 10)
+    expect(FFI.errno).to eq(0)
+
+    # ignore_errno: true — C errno is set to ERANGE by strtol but save_errno is skipped
+    expect(jitlib.strtol(overflow_input, nil, 10)).to eq(long_max)
+    expect(FFI.errno).to eq(0)
+  end
+
+  it 'supports ignore_errno option in blocking calls' do
+    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+
+    ulong_max = (2**(FFI.type_size(:long) * 8)) - 1
+    overflow_input = '42' * 10
+
+    jitlib.attach_llvm_jit_function :strtoul_tracked, :strtoul, %i[string string int], :ulong, blocking: true
+    jitlib.attach_llvm_jit_function :strtoul, %i[string string int], :ulong, blocking: true, ignore_errno: true
+
+    expect(jitlib.strtoul_tracked(overflow_input, nil, 10)).to eq(ulong_max)
+    expect(FFI.errno).to eq(Errno::ERANGE::Errno)
+
+    FFI.errno = 0
+    jitlib.strtoul_tracked('42', nil, 10)
+    expect(FFI.errno).to eq(0)
+
+    expect(jitlib.strtoul(overflow_input, nil, 10)).to eq(ulong_max)
+    expect(FFI.errno).to eq(0)
   end
 
   it 'supports stdcall' do

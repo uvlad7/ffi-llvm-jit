@@ -72,23 +72,18 @@ unsigned long int factorial(unsigned int n) {
     }
 }
 
-// When called as a JIT blocking call (blocking: true), this runs inside
-// rb_thread_call_without_gvl. Calling an FFI::Function callback from there
-// triggers FFI's trampoline → rb_thread_call_with_gvl → blocking_region_end
-// → rb_thread_check_ints, which processes any pending thread.raise interrupt.
-// Used by spec/gvl_reentry_repro.rb to reproduce the exception-propagation
-// bug cross-platform (no APC / Windows-specific code required).
-void spec_spin_callback(uint64_t cb_addr, uint64_t data_addr, uint32_t iterations) {
-    void (*cb)(uint64_t) = (void (*)(uint64_t)) (uintptr_t) cb_addr;
-    for (uint32_t i = 0; i < iterations; i++) {
-        cb(data_addr);
-    }
+// Stored-callback variant: the callback address is saved globally by spec_store_callback
+// (called via regular FFI) and invoked by spec_invoke_stored_callback (called via JIT).
+// Tests JIT exception propagation when the callback is not passed as a parameter
+// (JIT does not support pointer types yet).
+// Note: if the callback raises, save_callback_exception zeroes cb->retval, so
+// spec_invoke_stored_callback returns 0 before the exception is re-raised.
+static uint64_t (*spec_global_callback)(uint64_t) = NULL;
+
+void spec_store_callback(uint64_t cb_addr) {
+    spec_global_callback = (uint64_t (*)(uint64_t)) (uintptr_t) cb_addr;
 }
 
-// Calls cb(data) exactly once, synchronously, and returns the callback's result.
-// Used to test whether an exception raised inside a callback propagates back to
-// the caller (vs. the async thread.raise path tested by spec_spin_callback).
-uint64_t spec_invoke_callback(uint64_t cb_addr, uint64_t data_addr) {
-    uint64_t (*cb)(uint64_t) = (uint64_t (*)(uint64_t)) (uintptr_t) cb_addr;
-    return cb(data_addr);
+uint64_t spec_invoke_stored_callback(uint64_t data_addr) {
+    return spec_global_callback(data_addr);
 }

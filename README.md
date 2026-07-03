@@ -124,10 +124,38 @@ Lib.abs(3)  # to_native(3) => 9; C returns abs(9) = 9; from_native(9) => 18
 
 `FFI.errno` is saved after every JIT call, matching standard FFI behavior.
 
+> [!WARNING]
+> `FFI.errno` is not saved on Windows.
+
 ```ruby
 FFI.errno = 0
 LibCFFI.strtol('9' * 30, nil, 10)  # overflows
 FFI.errno  # => Errno::ERANGE::Errno
+```
+
+Pass `ignore_errno: true` to `attach_llvm_jit_function` to skip saving errno. This avoids the overhead for functions that never set it. Only available on `attach_llvm_jit_function`.
+
+```ruby
+LibCFFI.attach_llvm_jit_function :strlen, [:string], :size_t, ignore_errno: true
+```
+
+### Callback exceptions
+
+When a JIT-attached function calls back into Ruby (e.g. via an `FFI::Function` callback), any exception raised in the callback is propagated back to the JIT caller, matching the behavior of regular FFI.
+
+> [!WARNING]
+> Callback exception propagation is not supported on Windows.
+
+Note that callbacks can reach Ruby even without explicit callback parameters: a C function may call a previously stored Ruby callback (e.g. a function pointer set up by an earlier call via regular FFI).
+
+Pass `no_reraise: true` to `attach_llvm_jit_function` to skip the frame bookkeeping entirely. Use this when you either know the C function makes no calls back to Ruby, or don't care if callback exceptions are silently dropped. It removes the frame push/pop overhead, but any exception raised inside a callback — including one triggered by `Thread#kill` — is caught by FFI's `rb_rescue2` and dropped; the C function sees the callback return 0 and continues normally.
+
+For blocking calls, `no_reraise: true` additionally causes exceptions from `Thread#raise` targeting the calling thread to be silently dropped: the interrupt wakes the native function (via the unblock function), the raised exception is caught and discarded, and the call returns normally. `Thread#kill` is not affected — it uses a fatal interrupt that bypasses Ruby's rescue mechanism and terminates the thread regardless.
+
+Only available on `attach_llvm_jit_function`.
+
+```ruby
+LibCFFI.attach_llvm_jit_function :strlen, [:string], :size_t, no_reraise: true
 ```
 
 ### Typedefs

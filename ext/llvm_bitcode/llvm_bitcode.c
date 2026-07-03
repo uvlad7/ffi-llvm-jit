@@ -175,8 +175,10 @@ VALUE ffi_llvm_jit_save_exception(VALUE data, VALUE exc) {
 }
 
 __attribute__((always_inline)) void ffi_llvm_jit_raise_exception(VALUE exc) {
-    // For now, RTEST isn't needed here
-    if (exc) {
+    // RTEST is required: exc_store (Windows) is initialised to 0 (Qfalse, RTEST-falsy),
+    // while rbffi_frame_t.exc is initialised to Qnil (non-zero but RTEST-falsy).
+    // A plain `if (exc)` would incorrectly raise on Qnil.
+    if (RTEST(exc)) {
         rb_exc_raise(exc);
     }
 }

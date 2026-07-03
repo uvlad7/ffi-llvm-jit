@@ -69,12 +69,10 @@ module FFI
       # to register. FFI.errno is therefore unsupported on Windows until
       # rbffi_save_errno is exported (pending in the ffi fork).
       unless Gem.win_platform?
-        LLVM::C.add_symbol(
-          'ffi_llvm_jit_save_errno',
-          FFI::DynamicLibrary.send(
-            :load_library, FFI::CURRENT_PROCESS, nil,
-          ).find_function('rbffi_save_errno'),
-        )
+        current_process = FFI::DynamicLibrary.send(:load_library, FFI::CURRENT_PROCESS, nil)
+        %w[save_errno frame_push frame_pop save_frame_exception].each do |sym|
+          LLVM::C.add_symbol("ffi_llvm_jit_#{sym}", current_process.find_function("rbffi_#{sym}"))
+        end
       end
 
       LLVM.init_jit
@@ -145,6 +143,17 @@ module FFI
         LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
         VOID_PTR_T,
       )
+
+      unless Gem.win_platform?
+        # ffi_llvm_jit_frame_t: { td: ptr, prev: ptr, exc: VALUE }
+        # Windows omits td but frame push/pop/save_frame_exception are unused there.
+        frame_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_frame')
+        frame_t = LLVM::Type.from_ptr(frame_t_ptr) unless frame_t_ptr.null?
+        $stderr.puts "ffi_llvm_jit: FRAME_T from bitcode=#{!frame_t.nil?}" if ENV['FFI_LLVM_JIT_DEBUG']
+        FRAME_T = frame_t || LLVM::Struct(VOID_PTR_T, VOID_PTR_T, VALUE)
+        FRAME_EXC_INDEX = 2
+        private_constant :FRAME_T, :FRAME_EXC_INDEX
+      end
 
       LLVM_TYPES = {
         # Again, not sure. Char resolves into int8, but internally it uses 'signed char'
@@ -287,7 +296,7 @@ module FFI
       ###### End ######
 
       def attach_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
-        attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
+        attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: jit_only)
       rescue UnsupportedError
         raise if jit_only
 
@@ -308,14 +317,16 @@ module FFI
         invoker
       end
 
-      def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options)
+      def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
         # raise UnsupportedErrror, 'FFI.errno is unsupported on Windows' if Gem.win_platform? && !@i_dont_use_errno_i_promise
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
         # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless @yolo ||
         #   SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
 
-        unknown_options = options.keys - %i[convention type_map blocking enums]
+        allowed = %i[convention type_map blocking enums]
+        allowed += %i[no_reraise ignore_errno] if jit_only
+        unknown_options = options.keys - allowed
         unless unknown_options.empty?
           raise UnsupportedError, "Unsupported option#{'s' if unknown_options.size > 1}: #{unknown_options.join(', ')}"
         end
@@ -360,6 +371,8 @@ module FFI
         rb_func_addr, uniq_id = llvm_jit_function_addr(
           mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
           blocking: options[:blocking],
+          no_reraise: options[:no_reraise],
+          ignore_errno: options[:ignore_errno],
         )
         attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
       end
@@ -427,7 +440,7 @@ module FFI
       end
       # rubocop:enable Metrics/ParameterLists
 
-      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
+      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:, no_reraise: false, ignore_errno: false)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
@@ -481,8 +494,10 @@ module FFI
             if blocking
               params_store = builder.alloca(params_store_t) if params_store_t
               call_data = builder.alloca(BLOCKING_CALL_T)
-              exc_store = builder.alloca(VALUE)
+              exc_store = builder.alloca(VALUE) if Gem.win_platform? || no_reraise
             end
+            # no_reraise: skip frame alloca/push/pop when exceptions from callbacks or thread interrupts can be dropped
+            frame = builder.alloca(FRAME_T) unless Gem.win_platform? || no_reraise
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
               builder.call(
                 link_external_function(llvm_mod, "ffi_llvm_jit_value_to_#{arg_type}"),
@@ -491,22 +506,22 @@ module FFI
             end
             res = if blocking
                     emit_blocking_call(
-                      builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func,
+                      builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func,
                       void_ret ? nil : ret_type, params_store, call_data,
+                      ignore_errno: ignore_errno,
+                      no_reraise: no_reraise,
                     )
                   else
-                    emit_cfunc_call(
-                      builder, call_conv, converted_params, func_ptr, func_t,
-                    )
+                    builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame) if frame
+                    ret = emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
+                    builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_pop'), frame) if frame
+                    builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless ignore_errno || Gem.win_platform?
+                    if frame
+                      exc = builder.load2(VALUE, builder.gep2(FRAME_T, frame, [LLVM::Int(0), LLVM::Int(FRAME_EXC_INDEX)], ''))
+                      builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), exc)
+                    end
+                    ret
                   end
-            # TODO: make it optional - in orig FFI there is ignoreErrno flag that's never set
-            builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless Gem.win_platform?
-            # In FFI it's also used to re-raise from callbacks, but here it's only for blocking calls
-            if blocking
-              builder.call(
-                link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store),
-              )
-            end
             builder.ret(
               if void_ret
                 builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
@@ -547,14 +562,9 @@ module FFI
 
       # rubocop:disable Metrics/ParameterLists
       def emit_blocking_call(
-        builder, llvm_mod, params_store_t, exc_store, converted_params, call_blocking_func, ret_type,
-        params_store, call_data
+        builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func, ret_type,
+        params_store, call_data, ignore_errno: false, no_reraise: false
       )
-        builder.store(
-          # Maybe use Qnil here? But const is probably faster
-          VALUE.from_i(0),
-          exc_store,
-        )
         converted_params.each_with_index do |p, i|
           builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
         end
@@ -563,15 +573,38 @@ module FFI
           params_store || VOID_PTR_T.null,
           builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''),
         )
-        builder.call(
-          link_external_function(llvm_mod, 'rb_rescue2'),
-          link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
-          builder.ptr2int(call_data, VALUE),
-          link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
-          builder.ptr2int(exc_store, VALUE),
-          builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
-          VALUE.from_i(0),
-        )
+        if Gem.win_platform? || no_reraise
+          builder.store(VALUE.from_i(0), exc_store)
+          builder.call(
+            link_external_function(llvm_mod, 'rb_rescue2'),
+            link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
+            builder.ptr2int(call_data, VALUE),
+            link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
+            builder.ptr2int(exc_store, VALUE),
+            builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
+            VALUE.from_i(0),
+          )
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless ignore_errno || Gem.win_platform?
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store)) unless no_reraise
+        else
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame)
+          builder.call(
+            link_external_function(llvm_mod, 'rb_rescue2'),
+            link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
+            builder.ptr2int(call_data, VALUE),
+            link_external_function(llvm_mod, 'ffi_llvm_jit_save_frame_exception'),
+            builder.ptr2int(frame, VALUE),
+            builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
+            VALUE.from_i(0),
+          )
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_pop'), frame)
+          exc = builder.load2(
+            VALUE,
+            builder.gep2(FRAME_T, frame, [LLVM::Int(0), LLVM::Int(FRAME_EXC_INDEX)], ''),
+          )
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless ignore_errno
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), exc)
+        end
         return unless ret_type
 
         builder.load2(
@@ -579,7 +612,6 @@ module FFI
           builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(converted_params.size)], ''),
         )
       end
-      # rubocop:enable Metrics/ParameterLists
 
       def emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
         func_ptr_val = builder.load(func_ptr)
@@ -589,6 +621,7 @@ module FFI
         res.call_conv = call_conv if call_conv
         res
       end
+      # rubocop:enable Metrics/ParameterLists
 
       def link_external_function(mod, name)
         unless mod.functions[name]

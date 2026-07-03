@@ -17,6 +17,37 @@
 #ifndef FFI_LLVM_JIT_WIN_PLATFORM
 /* Resolved at JIT load time via LLVM::C.add_symbol */
 extern void ffi_llvm_jit_save_errno(void);
+
+/* ABI-SENSITIVE COPY — READ BEFORE TOUCHING.
+ *
+ * This struct mirrors rbffi_frame_t from ffi/ext/ffi_c/Thread.h verbatim.
+ * It must stay byte-for-byte identical to the FFI struct in field order,
+ * types, and alignment, or rbffi_frame_push/pop will corrupt their thread-
+ * local frame stack and produce use-after-free / wrong-exception bugs.
+ *
+ * VERIFIED against ffi gem versions: 1.16.3 – 1.17.4.
+ * Run `git -C ~/ffi diff v1.16.3 -- ext/ffi_c/Thread.*` to re-check if you
+ * update the ffi dependency in ffi_llvm_jit.gemspec.
+ *
+ * TODO (safe alternative): ask the ffi project to expose:
+ *   rbffi_frame_t* rbffi_frame_alloc(void);    -- heap-allocates + zeroes
+ *   void           rbffi_frame_free(rbffi_frame_t*);
+ *   void           rbffi_frame_raise(rbffi_frame_t*); -- raise if exc != Qnil
+ * Using those would remove the ABI coupling and let us drop this struct copy.
+ */
+typedef struct ffi_llvm_jit_frame {
+    void* td;
+    struct ffi_llvm_jit_frame* prev;
+    VALUE exc;
+} ffi_llvm_jit_frame_t;
+
+/* Resolved at JIT load time via LLVM::C.add_symbol (same as ffi_llvm_jit_save_errno):
+ *   ffi_llvm_jit_frame_push          → rbffi_frame_push
+ *   ffi_llvm_jit_frame_pop           → rbffi_frame_pop
+ *   ffi_llvm_jit_save_frame_exception → rbffi_save_frame_exception  */
+extern void  ffi_llvm_jit_frame_push(ffi_llvm_jit_frame_t* frame);
+extern void  ffi_llvm_jit_frame_pop(ffi_llvm_jit_frame_t* frame);
+extern VALUE ffi_llvm_jit_save_frame_exception(VALUE data, VALUE exc);
 #endif
 
 #ifdef FFI_LLVM_JIT_WIN_PLATFORM
@@ -39,6 +70,9 @@ __attribute__((noreturn)) void __stack_chk_fail(void) { __builtin_trap(); }
 __attribute__((used)) static void *llvm_keepalive[] = {
 #ifndef FFI_LLVM_JIT_WIN_PLATFORM
     (void *)ffi_llvm_jit_save_errno,
+    (void *)ffi_llvm_jit_frame_push,
+    (void *)ffi_llvm_jit_frame_pop,
+    (void *)ffi_llvm_jit_save_frame_exception,
 #endif
     (void *)rb_thread_call_without_gvl,
     (void *)rb_rescue2,

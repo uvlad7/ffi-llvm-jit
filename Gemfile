@@ -6,7 +6,7 @@ basename = File.basename(__FILE__)
 
 llvm_version = basename[/llvm_([\d_]+)/, 1]&.gsub('_', '.')
 # Only because its major version matches required llvm version and I have llvm-17 installed
-llvm_version ||= (Gem.win_platform? ? '~> 22' : '~> 18')
+llvm_version ||= (basename =~ /win(?:_|$)/ ? '~> 22' : '~> 18')
 
 ffi_version = basename[/ffi_([\d_]+)/, 1]&.gsub('_', '.')
 
