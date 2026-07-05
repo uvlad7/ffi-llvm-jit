@@ -17,6 +17,8 @@ on:
 # TODO: set CXX everywhere LLVM_CONFIG is set
 # TODO: clang in mingw deps?
 # TODO: test 32-bit Windows (i386-mingw32 Ruby + MINGW32 LLVM) to cover the stdcall calling convention
+# TODO: add Cygwin as a test target — on Cygwin, FFI.errno is C errno and FFI::LastError.winapi_error
+#   is GetLastError(), so they are distinct and both should be tested in the errno specs
 jobs:
   simple:
     runs-on: ${{ matrix.os }}

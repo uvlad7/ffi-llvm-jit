@@ -125,7 +125,9 @@ Lib.abs(3)  # to_native(3) => 9; C returns abs(9) = 9; from_native(9) => 18
 `FFI.errno` is saved after every JIT call, matching standard FFI behavior.
 
 > [!WARNING]
-> `FFI.errno` is not saved on Windows.
+> `FFI.errno` is not saved on Windows. `rbffi_save_errno` is not exported from `ffi_c.dll`, so the stored value is never updated. Note also that on Windows `FFI.errno` reflects `GetLastError()` rather than C errno, so it is meaningless for CRT functions like `strtol` regardless.
+>
+> On POSIX platforms, `FFI.errno` storage is native-thread-local (`pthread_key_t`-based). In M:N Ruby (≥3.3), the scheduler may migrate a Ruby thread to a different native thread between `rbffi_save_errno` and the user reading `FFI.errno`, causing the wrong value to be returned. This race is not specific to JIT or Windows — it affects regular FFI calls equally.
 
 ```ruby
 FFI.errno = 0
@@ -133,30 +135,16 @@ LibCFFI.strtol('9' * 30, nil, 10)  # overflows
 FFI.errno  # => Errno::ERANGE::Errno
 ```
 
-Pass `ignore_errno: true` to `attach_llvm_jit_function` to skip saving errno. This avoids the overhead for functions that never set it. Only available on `attach_llvm_jit_function`.
-
-```ruby
-LibCFFI.attach_llvm_jit_function :strlen, [:string], :size_t, ignore_errno: true
-```
-
 ### Callback exceptions
 
 When a JIT-attached function calls back into Ruby (e.g. via an `FFI::Function` callback), any exception raised in the callback is propagated back to the JIT caller, matching the behavior of regular FFI.
 
 > [!WARNING]
-> Callback exception propagation is not supported on Windows.
+> Callback exception propagation is not supported on Windows. `rbffi_frame_push/pop` are not exported from `ffi_c.dll`, so no frame is pushed around JIT calls. Callback exceptions are silently dropped. Additionally, if a JIT-attached function triggers a Ruby callback while a regular FFI call is active further up the stack, the exception may be written into the enclosing FFI frame and surface as a spurious exception in that outer call.
+>
+> `Thread#kill` uses `TAG_FATAL`, which bypasses `rb_rescue2` and skips `frame_pop` on all platforms, leaving `rbffi_current_frame` pointing to freed stack memory on the native thread. This becomes a use-after-free when a regular FFI call is killed and a JIT call subsequently runs on the same native thread and triggers a callback. This scenario can occur in M:N Ruby (≥3.3), where native threads are pooled and reused across Ruby threads, and on Windows, where JIT calls never push their own frame and so inherit whatever frame a regular FFI call left behind.
 
 Note that callbacks can reach Ruby even without explicit callback parameters: a C function may call a previously stored Ruby callback (e.g. a function pointer set up by an earlier call via regular FFI).
-
-Pass `no_reraise: true` to `attach_llvm_jit_function` to skip the frame bookkeeping entirely. Use this when you either know the C function makes no calls back to Ruby, or don't care if callback exceptions are silently dropped. It removes the frame push/pop overhead, but any exception raised inside a callback — including one triggered by `Thread#kill` — is caught by FFI's `rb_rescue2` and dropped; the C function sees the callback return 0 and continues normally.
-
-For blocking calls, `no_reraise: true` additionally causes exceptions from `Thread#raise` targeting the calling thread to be silently dropped: the interrupt wakes the native function (via the unblock function), the raised exception is caught and discarded, and the call returns normally. `Thread#kill` is not affected — it uses a fatal interrupt that bypasses Ruby's rescue mechanism and terminates the thread regardless.
-
-Only available on `attach_llvm_jit_function`.
-
-```ruby
-LibCFFI.attach_llvm_jit_function :strlen, [:string], :size_t, no_reraise: true
-```
 
 ### Typedefs
 

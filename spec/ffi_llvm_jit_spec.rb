@@ -239,33 +239,37 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno' do
-    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
-
     jitlib.attach_llvm_jit_function :strtol, %i[string string int], :long
     FFI.errno = 0
     long_max = (2**((FFI.type_size(:long) * 8) - 1)) - 1
     expect(jitlib.strtol('42' * 10, nil, 10)).to eq(long_max)
-    expect(FFI.errno).to eq(Errno::ERANGE::Errno)
-    FFI.errno = 0
-    expect(jitlib.strtol('42', nil, 10)).to eq(42)
-    expect(FFI.errno).to eq(0)
+    if Gem.win_platform?
+      expect(FFI.errno).to eq(0) # errno is not saved on Windows
+    else
+      expect(FFI.errno).to eq(Errno::ERANGE::Errno)
+      FFI.errno = 0
+      expect(jitlib.strtol('42', nil, 10)).to eq(42)
+      expect(FFI.errno).to eq(0)
+    end
   end
 
   it 'saves errno in blocking calls' do
-    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
-
-    jitlib.attach_llvm_jit_function :strtoul, %i[string string int], :ulong
+    jitlib.attach_llvm_jit_function :strtoul, %i[string string int], :ulong, blocking: true
     FFI.errno = 0
     ulong_max = (2**(FFI.type_size(:long) * 8)) - 1
     expect(jitlib.strtoul('42' * 10, nil, 10)).to eq(ulong_max)
-    expect(FFI.errno).to eq(Errno::ERANGE::Errno)
-    FFI.errno = 0
-    expect(jitlib.strtoul('42', nil, 10)).to eq(42)
-    expect(FFI.errno).to eq(0)
+    if Gem.win_platform?
+      expect(FFI.errno).to eq(0) # errno is not saved on Windows
+    else
+      expect(FFI.errno).to eq(Errno::ERANGE::Errno)
+      FFI.errno = 0
+      expect(jitlib.strtoul('42', nil, 10)).to eq(42)
+      expect(FFI.errno).to eq(0)
+    end
   end
 
   it 'saves errno in interrupted blocking call (sleep)' do
-    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+    skip 'POSIX sleep() not available on Windows' if Gem.win_platform?
 
     jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true
 
@@ -283,7 +287,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
   end
 
   it 'saves errno in interrupted blocking call (read)' do
-    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
+    skip 'read() not available on Windows' if Gem.win_platform?
 
     jitlib.attach_llvm_jit_function :read_jit, :read, %i[int string size_t], :ssize_t, blocking: true
 
@@ -303,6 +307,26 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     sleep(0.1) until thread.stop?
     thread.raise('Wake up')
     expect(thread.value).to eq({ errno: Errno::EINTR::Errno })
+  end
+
+  it 'does not save errno in interrupted blocking call (SleepEx)' do
+    skip 'Windows only' unless Gem.win_platform?
+
+    jitlib.attach_llvm_jit_function :sleep_jit, :SleepEx, %i[uint int], :uint, blocking: true
+
+    thread = Thread.new do
+      FFI.errno = 0
+      begin
+        jitlib.sleep_jit(3_600_000, 1)
+      rescue RuntimeError
+        { errno: FFI.errno }
+      end
+    end
+    sleep(0.1) until thread.stop?
+    thread.raise('Wake up')
+    expect(thread.status).to eq('sleep')
+    wake_sleepex.call(thread)
+    expect(thread.value).to eq({ errno: 0 }) # errno not saved on Windows
   end
 
   it 'supports long long' do
@@ -436,24 +460,15 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     # kill/raise don't interrupt SleepEx with the default UBF on Windows
     # (matches regular FFI behaviour). GVL release is verified via thread.stop?.
     # Threads are woken for cleanup via QueueUserAPC (not used in the production UBF).
+    # Note: native_thread_id requires Ruby 3.1+; Windows tests are only run on 3.4.
     jitlib.attach_llvm_jit_function :sleep_jit, :SleepEx, %i[uint int], :uint, blocking: true
     expect(jitlib.sleep_jit(0, 0)).to eq(0)
-
-    jitlib.attach_function :open_thread, :OpenThread, %i[uint int uint], :pointer
-    jitlib.attach_function :queue_user_apc, :QueueUserAPC, %i[pointer pointer ulong_long], :uint
-    jitlib.attach_function :close_handle, :CloseHandle, [:pointer], :int
-    wake_apc = jitlib.attach_function :spec_blocking_void_ret_void_param, [], :void
-    wake = ->(t) do
-      h = jitlib.open_thread(0x0010, 0, t.native_thread_id) # THREAD_SET_CONTEXT
-      jitlib.queue_user_apc(wake_apc, h, 0)
-      jitlib.close_handle(h)
-    end
 
     thread = Thread.new { jitlib.sleep_jit(3_600_000, 1) }
     sleep(0.1) until thread.stop?
     thread.kill
     expect(thread.status).to eq('sleep')
-    wake.(thread)
+    wake_sleepex.call(thread)
     expect(thread.value).to be_nil
 
     thread = Thread.new { jitlib.sleep_jit(3_600_000, 1) }
@@ -461,7 +476,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     sleep(0.1) until thread.stop?
     thread.raise('Ooops')
     expect(thread.status).to eq('sleep')
-    wake.(thread)
+    wake_sleepex.call(thread)
     expect { thread.value }.to raise_error(RuntimeError, 'Ooops')
   end
 
@@ -498,6 +513,20 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.spec_blocking_void_ret_void_param).to be_nil
   end
 
+  # Windows-only helper: wakes a thread blocked in an alertable wait via QueueUserAPC.
+  # Requires Ruby 3.1+ for native_thread_id; Windows tests are only run on 3.4.
+  let(:wake_sleepex) do
+    jitlib.attach_function :open_thread, :OpenThread, %i[uint int uint], :pointer
+    jitlib.attach_function :queue_user_apc, :QueueUserAPC, %i[pointer pointer ulong_long], :uint
+    jitlib.attach_function :close_handle, :CloseHandle, [:pointer], :int
+    wake_apc = jitlib.attach_function :spec_blocking_void_ret_void_param, [], :void
+    ->(t) do
+      h = jitlib.open_thread(0x0010, 0, t.native_thread_id) # THREAD_SET_CONTEXT
+      jitlib.queue_user_apc(wake_apc, h, 0)
+      jitlib.close_handle(h)
+    end
+  end
+
   # Helper: a plain FFI module against the same native libraries.
   let(:plain_ffi) do
     Module.new.tap do |mod|
@@ -531,105 +560,6 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
       expect { jitlib.spec_invoke_stored_callback(0) }.to raise_error(RuntimeError, 'boom')
       expect { jitlib.spec_invoke_stored_callback_nonblocking(0) }.to raise_error(RuntimeError, 'boom')
     end
-  end
-
-  it 'supports no_reraise option' do
-    jitlib.attach_llvm_jit_function :spec_converter, [:int], :int, no_reraise: true
-    expect(jitlib.spec_converter(5)).to eq(-5)
-
-    cb = FFI::Function.new(:uint64, [:uint64]) { |_| raise 'boom' }
-    plain_ffi.attach_function :spec_store_callback, [:uint64], :void
-    plain_ffi.spec_store_callback(cb.to_i)
-    jitlib.attach_llvm_jit_function :spec_invoke_stored_callback, [:uint64], :uint64, no_reraise: true
-    expect { jitlib.spec_invoke_stored_callback(0) }.not_to raise_error
-  end
-
-  it 'still terminates thread on thread.kill with no_reraise' do
-    jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true, no_reraise: true
-
-    continued = false
-    t = Thread.new do
-      jitlib.sleep_jit(3600)
-      continued = true
-    end
-    sleep(0.1) until t.stop?
-    t.kill
-    t.join
-    expect(continued).to be(false)
-  end
-
-  it 'drops thread.raise in no_reraise blocking calls' do
-    jitlib.attach_llvm_jit_function :sleep_jit, :sleep, %i[uint], :uint, blocking: true, no_reraise: true
-
-    continued = false
-    t = Thread.new do
-      jitlib.sleep_jit(3600)
-      continued = true
-    end
-    sleep(0.1) until t.stop?
-    t.raise 'interrupt'
-    t.join
-    expect(continued).to be(true)
-  end
-
-  it 'callback exception from inside no_reraise call leaks into enclosing frame' do
-    plain_ffi.attach_function :spec_store_callback, [:uint64], :void
-
-    jitlib.attach_llvm_jit_function :invoke_outer, :spec_invoke_stored_callback, [:uint64], :uint64
-    jitlib.attach_llvm_jit_function :invoke_inner, :spec_invoke_stored_callback, [:uint64], :uint64, no_reraise: true
-
-    inner_cb = FFI::Function.new(:uint64, [:uint64]) { |_| raise 'inner boom' }
-
-    outer_cb = FFI::Function.new(:uint64, [:uint64]) do |_|
-      plain_ffi.spec_store_callback(inner_cb.to_i)
-      jitlib.invoke_inner(0)
-      0
-    end
-
-    plain_ffi.spec_store_callback(outer_cb.to_i)
-    expect { jitlib.invoke_outer(0) }.to raise_error(RuntimeError, 'inner boom')
-  end
-
-  it 'supports ignore_errno option' do
-    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
-
-    long_max = (2**((FFI.type_size(:long) * 8) - 1)) - 1
-    overflow_input = '42' * 10
-
-    jitlib.attach_llvm_jit_function :strtol_tracked, :strtol, %i[string string int], :long
-    jitlib.attach_llvm_jit_function :strtol, %i[string string int], :long, ignore_errno: true
-
-    expect(jitlib.strtol_tracked(overflow_input, nil, 10)).to eq(long_max)
-    expect(FFI.errno).to eq(Errno::ERANGE::Errno)
-
-    # FFI.errno= sets C errno; then a successful tracked call saves that 0 into the stored value
-    FFI.errno = 0
-    jitlib.strtol_tracked('42', nil, 10)
-    expect(FFI.errno).to eq(0)
-
-    # ignore_errno: true — C errno is set to ERANGE by strtol but save_errno is skipped
-    expect(jitlib.strtol(overflow_input, nil, 10)).to eq(long_max)
-    expect(FFI.errno).to eq(0)
-  end
-
-  it 'supports ignore_errno option in blocking calls' do
-    skip 'FFI.errno is unsupported on Windows' if Gem.win_platform?
-
-    ulong_max = (2**(FFI.type_size(:long) * 8)) - 1
-    overflow_input = '42' * 10
-
-    jitlib.attach_llvm_jit_function :strtoul_tracked, :strtoul, %i[string string int], :ulong, blocking: true
-    jitlib.attach_llvm_jit_function :strtoul, %i[string string int], :ulong, blocking: true, ignore_errno: true
-
-    expect(jitlib.strtoul_tracked(overflow_input, nil, 10)).to eq(ulong_max)
-    expect(FFI.errno).to eq(Errno::ERANGE::Errno)
-
-    FFI.errno = 0
-    jitlib.strtoul_tracked('42', nil, 10)
-    expect(FFI.errno).to eq(0)
-
-    expect(jitlib.strtoul(overflow_input, nil, 10)).to eq(ulong_max)
-    expect(FFI.errno).to eq(0)
   end
 
   it 'supports stdcall' do

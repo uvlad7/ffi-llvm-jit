@@ -149,7 +149,7 @@ module FFI
         # Windows omits td but frame push/pop/save_frame_exception are unused there.
         frame_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_frame')
         frame_t = LLVM::Type.from_ptr(frame_t_ptr) unless frame_t_ptr.null?
-        $stderr.puts "ffi_llvm_jit: FRAME_T from bitcode=#{!frame_t.nil?}" if ENV['FFI_LLVM_JIT_DEBUG']
+        $stderr.puts "ffi_llvm_jit: FRAME_T from bitcode=#{!frame_t.nil?}"
         FRAME_T = frame_t || LLVM::Struct(VOID_PTR_T, VOID_PTR_T, VALUE)
         FRAME_EXC_INDEX = 2
         private_constant :FRAME_T, :FRAME_EXC_INDEX
@@ -325,7 +325,6 @@ module FFI
         #   SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
 
         allowed = %i[convention type_map blocking enums]
-        allowed += %i[no_reraise ignore_errno] if jit_only
         unknown_options = options.keys - allowed
         unless unknown_options.empty?
           raise UnsupportedError, "Unsupported option#{'s' if unknown_options.size > 1}: #{unknown_options.join(', ')}"
@@ -371,8 +370,6 @@ module FFI
         rb_func_addr, uniq_id = llvm_jit_function_addr(
           mname, function_handle.address, arg_type_names, ret_type_name, call_conv,
           blocking: options[:blocking],
-          no_reraise: options[:no_reraise],
-          ignore_errno: options[:ignore_errno],
         )
         attach_jit_and_wrappers(mname, rb_func_addr, uniq_id, arg_types, enum_types, type_mappers, options)
       end
@@ -440,7 +437,7 @@ module FFI
       end
       # rubocop:enable Metrics/ParameterLists
 
-      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:, no_reraise: false, ignore_errno: false)
+      def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
@@ -494,34 +491,38 @@ module FFI
             if blocking
               params_store = builder.alloca(params_store_t) if params_store_t
               call_data = builder.alloca(BLOCKING_CALL_T)
-              exc_store = builder.alloca(VALUE) if Gem.win_platform? || no_reraise
+              exc_store = builder.alloca(VALUE) if Gem.win_platform?
             end
-            # no_reraise: skip frame alloca/push/pop when exceptions from callbacks or thread interrupts can be dropped
-            frame = builder.alloca(FRAME_T) unless Gem.win_platform? || no_reraise
+            # No zero-init needed (unlike C's `rbffi_frame_t frame = { 0 }`):
+            # rbffi_frame_push does memset(frame, 0, sizeof(*frame)) before any read.
+            frame = builder.alloca(FRAME_T) unless Gem.win_platform?
             converted_params = arg_type_names.zip(params).map do |arg_type, param|
               builder.call(
                 link_external_function(llvm_mod, "ffi_llvm_jit_value_to_#{arg_type}"),
                 param,
               )
             end
-            res = if blocking
-                    emit_blocking_call(
-                      builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func,
-                      void_ret ? nil : ret_type, params_store, call_data,
-                      ignore_errno: ignore_errno,
-                      no_reraise: no_reraise,
-                    )
-                  else
-                    builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame) if frame
-                    ret = emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
-                    builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_pop'), frame) if frame
-                    builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless ignore_errno || Gem.win_platform?
-                    if frame
-                      exc = builder.load2(VALUE, builder.gep2(FRAME_T, frame, [LLVM::Int(0), LLVM::Int(FRAME_EXC_INDEX)], ''))
-                      builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), exc)
-                    end
-                    ret
-                  end
+            if blocking
+              emit_blocking_call(
+                builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func,
+                params_store, call_data,
+              )
+              res = void_ret ? nil : builder.load2(
+                ret_type,
+                builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(arg_types.size)], ''),
+              )
+            else
+              res = emit_non_blocking_call(builder, llvm_mod, call_conv, converted_params, func_ptr, func_t, frame)
+            end
+            builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless Gem.win_platform?
+            if Gem.win_platform?
+              if blocking
+                builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store))
+              end
+            else
+              exc = builder.load2(VALUE, builder.gep2(FRAME_T, frame, [LLVM::Int(0), LLVM::Int(FRAME_EXC_INDEX)], ''))
+              builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), exc)
+            end
             builder.ret(
               if void_ret
                 builder.load2(VALUE, link_external_global(llvm_mod, 'ffi_llvm_jit_Qnil'))
@@ -562,8 +563,8 @@ module FFI
 
       # rubocop:disable Metrics/ParameterLists
       def emit_blocking_call(
-        builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func, ret_type,
-        params_store, call_data, ignore_errno: false, no_reraise: false
+        builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func,
+        params_store, call_data
       )
         converted_params.each_with_index do |p, i|
           builder.store(p, builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(i)], ''))
@@ -573,7 +574,7 @@ module FFI
           params_store || VOID_PTR_T.null,
           builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''),
         )
-        if Gem.win_platform? || no_reraise
+        if Gem.win_platform?
           builder.store(VALUE.from_i(0), exc_store)
           builder.call(
             link_external_function(llvm_mod, 'rb_rescue2'),
@@ -584,8 +585,6 @@ module FFI
             builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
             VALUE.from_i(0),
           )
-          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless ignore_errno || Gem.win_platform?
-          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store)) unless no_reraise
         else
           builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame)
           builder.call(
@@ -598,19 +597,18 @@ module FFI
             VALUE.from_i(0),
           )
           builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_pop'), frame)
-          exc = builder.load2(
-            VALUE,
-            builder.gep2(FRAME_T, frame, [LLVM::Int(0), LLVM::Int(FRAME_EXC_INDEX)], ''),
-          )
-          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless ignore_errno
-          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), exc)
         end
-        return unless ret_type
+      end
 
-        builder.load2(
-          ret_type,
-          builder.gep2(params_store_t, params_store, [LLVM::Int(0), LLVM::Int(converted_params.size)], ''),
-        )
+      def emit_non_blocking_call(builder, llvm_mod, call_conv, converted_params, func_ptr, func_t, frame)
+        unless Gem.win_platform?
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame)
+        end
+        ret = emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
+        unless Gem.win_platform?
+          builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_pop'), frame)
+        end
+        ret
       end
 
       def emit_cfunc_call(builder, call_conv, converted_params, func_ptr, func_t)
