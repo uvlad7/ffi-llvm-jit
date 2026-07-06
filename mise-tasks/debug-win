@@ -5,9 +5,9 @@
 #USAGE flag "--backup" help="Back up the VM disk volume to a uniquely-named snapshot (debug-win-storage/backups/) and exit"
 #USAGE flag "--restore <name>" help="Restore the VM disk volume from a snapshot created by --backup, then exit"
 #USAGE flag "--shell <shell>" {
-#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, or bash (MSYS2 and MINGW development toolchain, via ridk exec bash)"
+#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, bash (MSYS2 MINGW64, 64-bit Ruby), bash32 (MSYS2 MINGW32, 32-bit Ruby — stdcall calling convention), cygwin (Cygwin bash — C errno and GetLastError() are separate channels), or mswin (MSVC Ruby — not yet implemented, see TODO in install.bat)"
 #USAGE   default "powershell"
-#USAGE   choices "powershell" "cmd" "bash"
+#USAGE   choices "powershell" "cmd" "bash" "bash32" "cygwin" "mswin"
 #USAGE }
 set -euo pipefail
 
@@ -144,16 +144,46 @@ powershell -Command "icacls C:\ProgramData\ssh\administrators_authorized_keys /i
 echo ==^> Downloading RubyInstaller 3.4.9 with DevKit... >> %LOG%
 curl -L --retry 3 -o "%TEMP%\rubyinstaller.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.4.9-1/rubyinstaller-devkit-3.4.9-1-x64.exe" >> %LOG% 2>&1
 echo ==^> Installing Ruby 3.4 with DevKit (silent)... >> %LOG%
-"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby34-x64" /components="ruby,rdoc,msys2" /tasks="modpath,assocfiles,noridkinstall" >> %LOG% 2>&1
+rem noridkinstall: we run ridk install 1 2 3 manually below; modpath/assocfiles omitted to avoid PATH conflicts with 32-bit Ruby and Cygwin
+"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby34-x64" /components="ruby,rdoc,msys2" /tasks="noridkinstall" >> %LOG% 2>&1
 echo ==^> Initializing MSYS2 base, system update, and MINGW development toolchain (ridk install 1 2 3)... >> %LOG%
 call C:\Ruby34-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
-echo ==^> Installing LLVM via MSYS2... >> %LOG%
-call C:\Ruby34-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm' >> %LOG% 2>&1
+echo ==^> Installing LLVM and clang via MSYS2... >> %LOG%
+call C:\Ruby34-x64\bin\ridk.cmd exec sh -c 'pacman -Syu --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm $MINGW_PACKAGE_PREFIX-clang' >> %LOG% 2>&1
 
 echo ==^> ruby version: >> %LOG%
 C:\Ruby34-x64\bin\ruby.exe --version >> %LOG% 2>&1
 echo ==^> llvm version: >> %LOG%
 call C:\Ruby34-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
+
+echo ==^> Downloading RubyInstaller 3.4.9 (32-bit) with DevKit... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\rubyinstaller32.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.4.9-1/rubyinstaller-devkit-3.4.9-1-x86.exe" >> %LOG% 2>&1
+echo ==^> Installing Ruby 3.4 (32-bit) with DevKit (silent)... >> %LOG%
+rem modpath/assocfiles omitted — same reason as 64-bit install above
+"%TEMP%\rubyinstaller32.exe" /verysilent /currentuser /dir="C:\Ruby34-x86" /components="ruby,rdoc,msys2" /tasks="noridkinstall" >> %LOG% 2>&1
+echo ==^> Initializing MSYS2 MINGW32 toolchain for 32-bit Ruby (ridk install 1 2 3)... >> %LOG%
+call C:\Ruby34-x86\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
+echo ==^> Installing MINGW32 LLVM and clang for 32-bit Ruby... >> %LOG%
+call C:\Ruby34-x86\bin\ridk.cmd exec sh -c 'pacman -S --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm $MINGW_PACKAGE_PREFIX-clang' >> %LOG% 2>&1
+echo ==^> 32-bit ruby version: >> %LOG%
+C:\Ruby34-x86\bin\ruby.exe --version >> %LOG% 2>&1
+echo ==^> 32-bit llvm version: >> %LOG%
+call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
+
+echo ==^> Downloading Cygwin setup... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\cygwin-setup.exe" "https://cygwin.com/setup-x86_64.exe" >> %LOG% 2>&1
+echo ==^> Installing Cygwin with ruby, llvm, clang, and dev tools... >> %LOG%
+"%TEMP%\cygwin-setup.exe" -q -n -N -d -s "https://mirrors.kernel.org/sourceware/cygwin/" -l "%TEMP%\cygwin-pkgs" -P ruby,ruby-devel,rubygems,ruby-irb,llvm,clang,make,gcc-core,libffi-devel,openssl-devel,zlib-devel,git,curl >> %LOG% 2>&1
+echo ==^> Cygwin ruby version: >> %LOG%
+C:\cygwin64\bin\ruby.exe --version >> %LOG% 2>&1
+echo ==^> Cygwin llvm-config version: >> %LOG%
+C:\cygwin64\bin\bash.exe --login -c "llvm-config --version" >> %LOG% 2>&1
+
+rem TODO: mswin Ruby (MSVC-based, no MinGW)
+rem   1. Install VS Build Tools: winget install Microsoft.VisualStudio.2022.BuildTools --silent --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools"
+rem   2. Download MSWIN Ruby binary (ruby/setup-ruby uses builds from github.com/ruby/ruby — find the exact URL from its ruby-builder-versions.json)
+rem   3. LLVM for mswin: winget install LLVM.LLVM  (provides llvm-config.exe in %ProgramFiles%\LLVM\bin)
+rem   4. Add --shell mswin case below pointing to cmd.exe with VS developer environment loaded
 
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
@@ -171,15 +201,14 @@ ENDBAT
 
 # `pacman -Sy` (sync only) vs `-Syu` (sync+upgrade) — `-Sy` alone caused a real dependency conflict (`mingw-w64-ucrt-x86_64-gcc-libs` version pin) when installing `mingw-w64-ucrt-x86_64-llvm`; fixed with `-Syu`
 
-# todo: install clang
-# todo: run bundle install but don't fail the installation if it fails.
-# same with the rest actually, just wrap it in `rescue` and report on error
-
-# echo ==^> Running bundle install for Windows gemfile... >> %LOG%
+# echo ==^> Running bundle install (64-bit)... >> %LOG%
 # cd /d Z:\
 # set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-win
 # C:\Ruby34-x64\bin\bundle config set --global without development >> %LOG% 2>&1
 # C:\Ruby34-x64\bin\bundle install >> %LOG% 2>&1
+
+# echo ==^> Running bundle install (Cygwin)... >> %LOG%
+# C:\cygwin64\bin\bash.exe --login -c "cd /cygdrive/z && BUNDLE_GEMFILE=gemfiles/Gemfile-cygwin bundle install --without development"  >> %LOG% 2>&1
 
 KVM_FLAG=""
 if [[ -e /dev/kvm ]]; then
@@ -271,8 +300,6 @@ done
 
 kill "$LOGS_PID" 2>/dev/null || true
 wait "$LOGS_PID" 2>/dev/null || true
-# TODO: cd into /z automatcially
-# TODO: 
 echo "==> Connecting (project available at Z:\\)..."
 # net use's /persistent:yes only auto-restores for the account/session that created it
 # (install.bat runs as a different logon than the SSH session), so each new SSH session
@@ -283,7 +310,23 @@ case "$usage_shell" in
     ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & cmd"
     ;;
   bash)
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby34-x64\\bin\\ridk.cmd exec bash"
+    # `ridk exec bash -c '...'` sets up the MINGW64 environment, then runs bash -c which
+    # cds to /z (Z: drive in MSYS2 path space) and execs an interactive bash in that dir.
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby34-x64\\bin\\ridk.cmd exec bash -c 'cd /z && exec bash'"
+    ;;
+  bash32)
+    # Same as bash but uses the 32-bit Ruby (MINGW32 environment) to test stdcall calling convention.
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby34-x86\\bin\\ridk.cmd exec bash -c 'cd /z && exec bash'"
+    ;;
+  cygwin)
+    # Cygwin uses /cygdrive/z for the Z: drive. On Cygwin, td_errno = C errno and
+    # td_winapi_errno = GetLastError() — distinct channels, unlike native Windows.
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\cygwin64\\bin\\bash.exe --login -c 'cd /cygdrive/z && exec bash --login'"
+    ;;
+  mswin)
+    # TODO: not yet implemented — see TODO comment in install.bat for what needs to be set up first.
+    echo "ERROR: --shell mswin is not yet implemented (mswin Ruby install not in install.bat yet)" >&2
+    exit 1
     ;;
   *)
     # ridk.ps1 is a separate script from ridk.cmd: PowerShell runs .ps1 files in-process
@@ -291,7 +334,8 @@ case "$usage_shell" in
     # survive into the interactive prompt that -NoExit drops into afterward. Must reference
     # the .ps1 explicitly — bare `ridk` would resolve to ridk.cmd, since .PS1 isn't in
     # %PATHEXT% by default. No spaces in the path, so it doesn't need its own quoting.
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby34-x64\\bin\\ridk.ps1 enable\""
+    # Set-Location Z:\ cds into the project share on startup.
+    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby34-x64\\bin\\ridk.ps1 enable; Set-Location Z:\\\""
     ;;
 esac
 

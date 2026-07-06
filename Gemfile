@@ -5,8 +5,14 @@ source 'https://rubygems.org'
 basename = File.basename(__FILE__)
 
 llvm_version = basename[/llvm_([\d_]+)/, 1]&.gsub('_', '.')
-# Only because its major version matches required llvm version and I have llvm-17 installed
-llvm_version ||= (basename =~ /win(?:_|$)/ ? '~> 22' : '~> 18')
+# win matched only after a delimiter so 'cygwin' does not accidentally match
+llvm_version ||= if basename =~ /(?:^|[-_])cygwin(?:[-_]|$)/
+                   '~> 20' # Cygwin ships LLVM 20.x
+                 elsif basename =~ /(?:^|[-_])win(?:[-_]|$)/
+                   '~> 22' # MSYS2/MINGW ships LLVM 22.x
+                 else
+                   '~> 18'
+                 end
 
 ffi_version = basename[/ffi_([\d_]+)/, 1]&.gsub('_', '.')
 
