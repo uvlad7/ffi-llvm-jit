@@ -171,13 +171,21 @@ echo ==^> 32-bit llvm version: >> %LOG%
 call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
 
 echo ==^> Downloading Cygwin setup... >> %LOG%
-curl -L --retry 3 -o "%TEMP%\cygwin-setup.exe" "https://cygwin.com/setup-x86_64.exe" >> %LOG% 2>&1
+rem saved to C:\cygwin-setup.exe so it persists across reboots
+rem to add packages later: C:\cygwin-setup.exe --quiet-mode --no-shortcuts --root C:\cygwin64 --site "https://mirrors.kernel.org/sourceware/cygwin/" --local-package-dir "C:\cygwin-pkgs" --packages <pkg>
+curl -L --retry 3 -o "C:\cygwin-setup.exe" "https://cygwin.com/setup-x86_64.exe" >> %LOG% 2>&1
 echo ==^> Installing Cygwin with ruby, llvm, clang, and dev tools... >> %LOG%
-"%TEMP%\cygwin-setup.exe" -q -n -N -d -s "https://mirrors.kernel.org/sourceware/cygwin/" -l "%TEMP%\cygwin-pkgs" -P ruby,ruby-devel,rubygems,ruby-irb,llvm,clang,make,gcc-core,libffi-devel,openssl-devel,zlib-devel,git,curl >> %LOG% 2>&1
+rem --root C:\cygwin64: explicit; without it --no-admin would redirect install to %USERPROFILE%\cygwin64
+rem no --no-admin: install.bat runs as SYSTEM/admin during first-boot OEM setup, so C:\cygwin64 is writable
+rem --local-package-dir C:\cygwin-pkgs: persistent cache, reused by the add-packages command above
+C:\cygwin-setup.exe --quiet-mode --no-shortcuts --root "C:\cygwin64" --site "https://mirrors.kernel.org/sourceware/cygwin/" --local-package-dir "C:\cygwin-pkgs" --packages ruby,ruby-devel,rubygems,ruby-irb,llvm,clang,make,gcc-core,libffi-devel,openssl-devel,zlib-devel,git,curl >> %LOG% 2>&1
 echo ==^> Cygwin ruby version: >> %LOG%
 C:\cygwin64\bin\ruby.exe --version >> %LOG% 2>&1
 echo ==^> Cygwin llvm-config version: >> %LOG%
 C:\cygwin64\bin\bash.exe --login -c "llvm-config --version" >> %LOG% 2>&1
+
+echo ==^> Setting BUNDLE_WITHOUT=development persistently (HKCU\Environment, inherited by all shells)... >> %LOG%
+setx BUNDLE_WITHOUT development >> %LOG% 2>&1
 
 rem TODO: mswin Ruby (MSVC-based, no MinGW)
 rem   1. Install VS Build Tools: winget install Microsoft.VisualStudio.2022.BuildTools --silent --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools"
@@ -202,13 +210,12 @@ ENDBAT
 # `pacman -Sy` (sync only) vs `-Syu` (sync+upgrade) — `-Sy` alone caused a real dependency conflict (`mingw-w64-ucrt-x86_64-gcc-libs` version pin) when installing `mingw-w64-ucrt-x86_64-llvm`; fixed with `-Syu`
 
 # echo ==^> Running bundle install (64-bit)... >> %LOG%
-# cd /d Z:\
 # set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-win
-# C:\Ruby34-x64\bin\bundle config set --global without development >> %LOG% 2>&1
+# cd /d Z:\
 # C:\Ruby34-x64\bin\bundle install >> %LOG% 2>&1
 
 # echo ==^> Running bundle install (Cygwin)... >> %LOG%
-# C:\cygwin64\bin\bash.exe --login -c "cd /cygdrive/z && BUNDLE_GEMFILE=gemfiles/Gemfile-cygwin bundle install --without development"  >> %LOG% 2>&1
+# C:\cygwin64\bin\bash.exe --login -c "cd /cygdrive/z && BUNDLE_GEMFILE=gemfiles/Gemfile-cygwin bundle install" >> %LOG% 2>&1
 
 KVM_FLAG=""
 if [[ -e /dev/kvm ]]; then
@@ -305,23 +312,26 @@ echo "==> Connecting (project available at Z:\\)..."
 # (install.bat runs as a different logon than the SSH session), so each new SSH session
 # needs its own remap; chaining it onto the remote command is simpler than fighting that.
 NET_USE_Z='net use Z: \\host.lan\Data /persistent:yes >nul 2>&1'
+SSH="ssh -t -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost"
 case "$usage_shell" in
   cmd)
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & cmd"
+    # Ruby bin added to PATH; BUNDLE_GEMFILE set here (BUNDLE_WITHOUT is persistent via setx in install.bat).
+    $SSH "${NET_USE_Z} & set PATH=C:\\Ruby34-x64\\bin;%PATH% & set BUNDLE_GEMFILE=Z:\\gemfiles\\Gemfile-win & cmd"
     ;;
   bash)
-    # `ridk exec bash -c '...'` sets up the MINGW64 environment, then runs bash -c which
-    # cds to /z (Z: drive in MSYS2 path space) and execs an interactive bash in that dir.
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby34-x64\\bin\\ridk.cmd exec bash -c 'cd /z && exec bash'"
+    # `ridk exec bash -c '...'` sets up MINGW64. Exported vars survive exec.
+    # /c/Ruby34-x64/bin is the MSYS2 path for C:\Ruby34-x64\bin (not in system PATH — modpath was omitted).
+    $SSH "${NET_USE_Z} & C:\\Ruby34-x64\\bin\\ridk.cmd exec bash -c 'export PATH=/c/Ruby34-x64/bin:\$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win && cd /z && exec bash'"
     ;;
   bash32)
     # Same as bash but uses the 32-bit Ruby (MINGW32 environment) to test stdcall calling convention.
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\Ruby34-x86\\bin\\ridk.cmd exec bash -c 'cd /z && exec bash'"
+    $SSH "${NET_USE_Z} & C:\\Ruby34-x86\\bin\\ridk.cmd exec bash -c 'export PATH=/c/Ruby34-x86/bin:\$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win && cd /z && exec bash'"
     ;;
   cygwin)
     # Cygwin uses /cygdrive/z for the Z: drive. On Cygwin, td_errno = C errno and
     # td_winapi_errno = GetLastError() — distinct channels, unlike native Windows.
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & C:\\cygwin64\\bin\\bash.exe --login -c 'cd /cygdrive/z && exec bash --login'"
+    # Cygwin Ruby is at /usr/bin/ruby (on PATH via --login). BUNDLE_WITHOUT is inherited from Windows env.
+    $SSH "${NET_USE_Z} & C:\\cygwin64\\bin\\bash.exe --login -c 'export BUNDLE_GEMFILE=/cygdrive/z/gemfiles/Gemfile-cygwin && cd /cygdrive/z && exec bash --login'"
     ;;
   mswin)
     # TODO: not yet implemented — see TODO comment in install.bat for what needs to be set up first.
@@ -334,8 +344,8 @@ case "$usage_shell" in
     # survive into the interactive prompt that -NoExit drops into afterward. Must reference
     # the .ps1 explicitly — bare `ridk` would resolve to ridk.cmd, since .PS1 isn't in
     # %PATHEXT% by default. No spaces in the path, so it doesn't need its own quoting.
-    # Set-Location Z:\ cds into the project share on startup.
-    ssh -t -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby34-x64\\bin\\ridk.ps1 enable; Set-Location Z:\\\""
+    # BUNDLE_WITHOUT is inherited from Windows env (set via setx in install.bat).
+    $SSH "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby34-x64\\bin\\ridk.ps1 enable; \$env:PATH = 'C:\\Ruby34-x64\\bin;' + \$env:PATH; \$env:BUNDLE_GEMFILE = 'Z:\\gemfiles\\Gemfile-win'; Set-Location Z:\\\""
     ;;
 esac
 
