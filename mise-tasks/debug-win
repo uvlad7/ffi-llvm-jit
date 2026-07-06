@@ -5,9 +5,9 @@
 #USAGE flag "--backup" help="Back up the VM disk volume to a uniquely-named snapshot (debug-win-storage/backups/) and exit"
 #USAGE flag "--restore <name>" help="Restore the VM disk volume from a snapshot created by --backup, then exit"
 #USAGE flag "--shell <shell>" {
-#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, bash (MSYS2 MINGW64, 64-bit Ruby), bash32 (MSYS2 MINGW32, 32-bit Ruby — stdcall calling convention), cygwin (Cygwin bash — C errno and GetLastError() are separate channels), or mswin (MSVC Ruby — not yet implemented, see TODO in install.bat)"
+#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, bash (MSYS2 MINGW64, 64-bit Ruby), bash32 (MSYS2 MINGW32, 32-bit Ruby — stdcall calling convention), cygwin (Cygwin bash — C errno and GetLastError() are separate channels), mswin (MSVC Ruby — PowerShell with VS developer environment; for cmd instead: mswin-cmd)"
 #USAGE   default "powershell"
-#USAGE   choices "powershell" "cmd" "bash" "bash32" "cygwin" "mswin"
+#USAGE   choices "powershell" "cmd" "bash" "bash32" "cygwin" "mswin" "mswin-cmd"
 #USAGE }
 set -euo pipefail
 
@@ -187,11 +187,30 @@ C:\cygwin64\bin\bash.exe --login -c "llvm-config --version" >> %LOG% 2>&1
 echo ==^> Setting BUNDLE_WITHOUT=development persistently (HKCU\Environment, inherited by all shells)... >> %LOG%
 setx BUNDLE_WITHOUT development >> %LOG% 2>&1
 
-rem TODO: mswin Ruby (MSVC-based, no MinGW)
-rem   1. Install VS Build Tools: winget install Microsoft.VisualStudio.2022.BuildTools --silent --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools"
-rem   2. Download MSWIN Ruby binary (ruby/setup-ruby uses builds from github.com/ruby/ruby — find the exact URL from its ruby-builder-versions.json)
-rem   3. LLVM for mswin: winget install LLVM.LLVM  (provides llvm-config.exe in %ProgramFiles%\LLVM\bin)
-rem   4. Add --shell mswin case below pointing to cmd.exe with VS developer environment loaded
+echo ==^> Installing VS Build Tools 2022 (C++ workload for compiling mswin native gems)... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\vs_buildtools.exe" "https://aka.ms/vs/17/release/vs_buildtools.exe" >> %LOG% 2>&1
+rem --wait blocks until VS setup completes; required before any MSVC compilation
+"%TEMP%\vs_buildtools.exe" --wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended >> %LOG% 2>&1
+
+echo ==^> Downloading 7zr.exe (standalone 7-Zip for extracting mswin Ruby archive)... >> %LOG%
+curl -L --retry 3 -o "C:\7zr.exe" "https://www.7-zip.org/a/7zr.exe" >> %LOG% 2>&1
+
+echo ==^> Downloading mswin Ruby 3.4.9 (MSVC-based — no MSYS2/MinGW)... >> %LOG%
+rem from ruby/ruby-builder; if this 404s, check ruby/setup-ruby ruby-builder-versions.json for the current URL
+curl -L --retry 3 -o "%TEMP%\ruby-mswin.7z" "https://github.com/ruby/ruby-builder/releases/download/toolchain-local/ruby-3.4.9-x64-mswin64_140.7z" >> %LOG% 2>&1
+echo ==^> Extracting mswin Ruby... >> %LOG%
+C:\7zr.exe x "%TEMP%\ruby-mswin.7z" -o"C:\" -y >> %LOG% 2>&1
+rem archive extracts to a versioned subdir; rename it to a stable path
+powershell -Command "Get-ChildItem 'C:\' -Directory | Where-Object { $_.Name -like 'ruby-3.4*mswin*' } | Select-Object -First 1 | Rename-Item -NewName 'Ruby34-mswin'" >> %LOG% 2>&1
+echo ==^> mswin ruby version: >> %LOG%
+C:\Ruby34-mswin\bin\ruby.exe --version >> %LOG% 2>&1
+
+echo ==^> Downloading LLVM 18 for mswin (official installer — provides llvm-config.exe for ruby-llvm)... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\llvm-installer.exe" "https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/LLVM-18.1.8-win64.exe" >> %LOG% 2>&1
+rem /S = silent NSIS install; installs to C:\Program Files\LLVM and adds to system PATH
+"%TEMP%\llvm-installer.exe" /S >> %LOG% 2>&1
+echo ==^> mswin LLVM version: >> %LOG%
+"%ProgramFiles%\LLVM\bin\llvm-config.exe" --version >> %LOG% 2>&1
 
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
@@ -334,9 +353,14 @@ case "$usage_shell" in
     $SSH "${NET_USE_Z} & C:\\cygwin64\\bin\\bash.exe --login -c 'export BUNDLE_GEMFILE=/cygdrive/z/gemfiles/Gemfile-cygwin && cd /cygdrive/z && exec bash --login'"
     ;;
   mswin)
-    # TODO: not yet implemented — see TODO comment in install.bat for what needs to be set up first.
-    echo "ERROR: --shell mswin is not yet implemented (mswin Ruby install not in install.bat yet)" >&2
-    exit 1
+    # PowerShell with VS developer environment pre-activated for MSVC compilation.
+    # Enter-VsDevShell sets INCLUDE, LIB, PATH for the MSVC toolchain — without it native gems won't compile.
+    # LLVM (official installer) ends up at C:\Program Files\LLVM\bin — ruby-llvm ~> 18 needs llvm-config on PATH.
+    $SSH "${NET_USE_Z} & powershell.exe -NoExit -Command \"Import-Module 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll'; Enter-VsDevShell -VsInstallPath 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools' -SkipAutomaticLocation -DevCmdArguments '-arch=x64'; \$env:PATH = 'C:\\Ruby34-mswin\\bin;C:\\Program Files\\LLVM\\bin;' + \$env:PATH; \$env:BUNDLE_GEMFILE = 'Z:\\gemfiles\\Gemfile-mswin'; Set-Location Z:\\\""
+    ;;
+  mswin-cmd)
+    # cmd.exe variant of mswin; VsDevCmd.bat activates the same MSVC environment as Enter-VsDevShell above.
+    $SSH "${NET_USE_Z} & set PATH=C:\\Ruby34-mswin\\bin;C:\\Program Files\\LLVM\\bin;%PATH% & set BUNDLE_GEMFILE=Z:\\gemfiles\\Gemfile-mswin & call \"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" & cmd"
     ;;
   *)
     # ridk.ps1 is a separate script from ridk.cmd: PowerShell runs .ps1 files in-process
