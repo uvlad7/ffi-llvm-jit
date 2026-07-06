@@ -205,10 +205,9 @@ powershell -Command "Get-ChildItem 'C:\' -Directory | Where-Object { $_.Name -li
 echo ==^> mswin ruby version: >> %LOG%
 C:\Ruby34-mswin\bin\ruby.exe --version >> %LOG% 2>&1
 
-echo ==^> Downloading LLVM 18 for mswin (official installer — provides llvm-config.exe for ruby-llvm)... >> %LOG%
-curl -L --retry 3 -o "%TEMP%\llvm-installer.exe" "https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/LLVM-18.1.8-win64.exe" >> %LOG% 2>&1
-rem /S = silent NSIS install; installs to C:\Program Files\LLVM and adds to system PATH
-"%TEMP%\llvm-installer.exe" /S >> %LOG% 2>&1
+echo ==^> Installing LLVM via winget (latest stable — provides llvm-config.exe for ruby-llvm)... >> %LOG%
+rem installs to C:\Program Files\LLVM and adds to system PATH; Gemfile-mswin pins ruby-llvm ~> 22 to match
+winget install LLVM.LLVM --silent --accept-package-agreements --accept-source-agreements >> %LOG% 2>&1
 echo ==^> mswin LLVM version: >> %LOG%
 "%ProgramFiles%\LLVM\bin\llvm-config.exe" --version >> %LOG% 2>&1
 

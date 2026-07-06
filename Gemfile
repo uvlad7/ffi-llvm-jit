@@ -8,6 +8,8 @@ llvm_version = basename[/llvm_([\d_]+)/, 1]&.gsub('_', '.')
 # win matched only after a delimiter so 'cygwin' does not accidentally match
 llvm_version ||= if basename =~ /(?:^|[-_])cygwin(?:[-_]|$)/
                    '~> 20' # Cygwin ships LLVM 20.x
+                 elsif basename =~ /(?:^|[-_])mswin(?:[-_]|$)/
+                   '~> 22' # winget (LLVM.LLVM) installs latest stable, currently 22.x
                  elsif basename =~ /(?:^|[-_])win(?:[-_]|$)/
                    '~> 22' # MSYS2/MINGW ships LLVM 22.x
                  else
