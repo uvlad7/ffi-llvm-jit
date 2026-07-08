@@ -29,7 +29,17 @@ RbConfig::MAKEFILE_CONFIG['LDSHARED'] =
 
 # required to push flags without checking
 $CFLAGS << ' -emit-llvm -c -Werror=implicit-function-declaration ' # rubocop:disable Style/GlobalVars
-$CFLAGS << ' -DFFI_LLVM_JIT_WIN_PLATFORM ' if Gem.win_platform? # rubocop:disable Style/GlobalVars
+# TODO: check which win_platform? guards are applicable on cygwin
+if Gem.win_platform? # rubocop:disable Style/GlobalVars
+  $CFLAGS << ' -DFFI_LLVM_JIT_WIN_PLATFORM '
+  # SYMBOL_PREFIX="_" (cdecl) but EXPORT_PREFIX="" (Ruby .def file exports without it):
+  # the LLVM JIT would look for _rb_eException but Ruby only exports rb_eException.
+  # -fno-leading-underscore sets m:e (ELF mangling) in the module data layout so
+  # JIT-compiled code references symbols by their exact DLL export name.
+  if RbConfig::CONFIG['SYMBOL_PREFIX'] == '_' && RbConfig::CONFIG['EXPORT_PREFIX'].strip.empty?
+    $CFLAGS << ' -fno-leading-underscore'
+  end
+end
 
 # MakeMakefile::COMPILE_C = config_string('COMPILE_C') ||
 #   '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG) -c $(CSRCFLAG)$<'

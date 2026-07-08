@@ -77,6 +77,19 @@ module FFI
 
       LLVM.init_jit
 
+      # On 32-bit Windows (MSYS2 i686) LLVMInitializeNativeTarget was observed to
+      # register nothing. Headers correctly define LLVM_NATIVE_TARGET=LLVMInitializeX86Target
+      # and ruby-llvm's support.cpp calls llvm::InitializeNativeTarget() — root cause TBD.
+      # Explicit X86 init is idempotent and ensures the target is always registered.
+      if Gem.win_platform? && LLVM_TRIPLE[0].match?(/\Ai[3-6]86\z/)
+        {
+          llvm_win32_x86_target_info:    :LLVMInitializeX86TargetInfo,
+          llvm_win32_x86_target:         :LLVMInitializeX86Target,
+          llvm_win32_x86_target_mc:      :LLVMInitializeX86TargetMC,
+          llvm_win32_x86_asm_printer:    :LLVMInitializeX86AsmPrinter,
+        }.each { |rb, c| LLVM::C.attach_function rb, c, [], :void; LLVM::C.send(rb) }
+      end
+
       asm_parser = SUPPORTED_ARCHS[LLVM_TRIPLE[0]]
       if asm_parser
         LLVM::C.attach_function :llvm_initialize_native_asm_parser, asm_parser, [], :void

@@ -9,9 +9,11 @@ llvm_version = basename[/llvm_([\d_]+)/, 1]&.gsub('_', '.')
 llvm_version ||= if basename =~ /(?:^|[-_])cygwin(?:[-_]|$)/
                    '~> 20' # Cygwin ships LLVM 20.x
                  elsif basename =~ /(?:^|[-_])mswin(?:[-_]|$)/
-                   '~> 22' # winget (LLVM.LLVM) installs latest stable, currently 22.x
+                   '~> 22' # MSYS2 UCRT64 libLLVM-22.dll (same install as x64 Ruby, ridk-resolved path)
+                 elsif basename =~ /(?:^|[-_])win32(?:[-_]|$)/
+                   '~> 21' # MSYS2 i686 archive tops out at LLVM 21.x (dropped from active repo)
                  elsif basename =~ /(?:^|[-_])win(?:[-_]|$)/
-                   '~> 22' # MSYS2/MINGW ships LLVM 22.x
+                   '~> 22' # MSYS2 UCRT64 ships LLVM 22.x
                  else
                    '~> 18'
                  end

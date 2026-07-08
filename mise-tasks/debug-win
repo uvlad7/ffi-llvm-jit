@@ -144,8 +144,8 @@ powershell -Command "icacls C:\ProgramData\ssh\administrators_authorized_keys /i
 echo ==^> Downloading RubyInstaller 3.4.9 with DevKit... >> %LOG%
 curl -L --retry 3 -o "%TEMP%\rubyinstaller.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.4.9-1/rubyinstaller-devkit-3.4.9-1-x64.exe" >> %LOG% 2>&1
 echo ==^> Installing Ruby 3.4 with DevKit (silent)... >> %LOG%
-rem noridkinstall: we run ridk install 1 2 3 manually below; modpath/assocfiles omitted to avoid PATH conflicts with 32-bit Ruby and Cygwin
-"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby34-x64" /components="ruby,rdoc,msys2" /tasks="noridkinstall" >> %LOG% 2>&1
+rem noridkinstall: we run ridk install 1 2 3 manually below; nomodpath: each shell script manages Ruby on PATH explicitly
+"%TEMP%\rubyinstaller.exe" /verysilent /currentuser /dir="C:\Ruby34-x64" /components="ruby,rdoc,msys2" /tasks="noridkinstall,nomodpath" >> %LOG% 2>&1
 echo ==^> Initializing MSYS2 base, system update, and MINGW development toolchain (ridk install 1 2 3)... >> %LOG%
 call C:\Ruby34-x64\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
 echo ==^> Installing LLVM and clang via MSYS2... >> %LOG%
@@ -159,12 +159,18 @@ call C:\Ruby34-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
 echo ==^> Downloading RubyInstaller 3.4.9 (32-bit) with DevKit... >> %LOG%
 curl -L --retry 3 -o "%TEMP%\rubyinstaller32.exe" "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-3.4.9-1/rubyinstaller-devkit-3.4.9-1-x86.exe" >> %LOG% 2>&1
 echo ==^> Installing Ruby 3.4 (32-bit) with DevKit (silent)... >> %LOG%
-rem modpath/assocfiles omitted — same reason as 64-bit install above
-"%TEMP%\rubyinstaller32.exe" /verysilent /currentuser /dir="C:\Ruby34-x86" /components="ruby,rdoc,msys2" /tasks="noridkinstall" >> %LOG% 2>&1
+rem nomodpath — same reason as 64-bit install above
+"%TEMP%\rubyinstaller32.exe" /verysilent /currentuser /dir="C:\Ruby34-x86" /components="ruby,rdoc,msys2" /tasks="noridkinstall,nomodpath" >> %LOG% 2>&1
 echo ==^> Initializing MSYS2 MINGW32 toolchain for 32-bit Ruby (ridk install 1 2 3)... >> %LOG%
 call C:\Ruby34-x86\bin\ridk.cmd install 1 2 3 >> %LOG% 2>&1
-echo ==^> Installing MINGW32 LLVM and clang for 32-bit Ruby... >> %LOG%
-call C:\Ruby34-x86\bin\ridk.cmd exec sh -c 'pacman -S --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm $MINGW_PACKAGE_PREFIX-clang' >> %LOG% 2>&1
+echo ==^> Downgrading MINGW32 gcc + gcc-libs to 15.2.0-14 to match LLVM 21.x (all i686 LLVM packages in the archive were compiled with GCC 15; GCC 16 orphan packages landed after LLVM was frozen)... >> %LOG%
+call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "pacman -U --noconfirm 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-gcc-15.2.0-14-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-gcc-libs-15.2.0-14-any.pkg.tar.zst'" >> %LOG% 2>&1
+echo ==^> Installing MINGW32 LLVM and clang for 32-bit Ruby (from MSYS2 archive via pacman -U -- removed from active repo but still hosted)... >> %LOG%
+rem mingw-w64-i686-llvm* were dropped from the active MSYS2 i686 repo but still exist on repo.msys2.org;
+rem pacman -U accepts URLs directly; llvm-libs provides libLLVM-21.dll needed by ruby-llvm at runtime
+call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "pacman -U --needed --noconfirm --disable-download-timeout 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-llvm-libs-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-llvm-tools-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-llvm-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-clang-libs-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-clang-21.1.8-4-any.pkg.tar.zst'" >> %LOG% 2>&1
+echo ==^> Creating LLVM-21.dll symlink (temporary; ruby-llvm 21 ffi_lib list lacks libLLVM-21.dll — fix upstream)... >> %LOG%
+call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "ln -sf /mingw32/bin/libLLVM-21.dll /mingw32/bin/LLVM-21.dll" >> %LOG% 2>&1
 echo ==^> 32-bit ruby version: >> %LOG%
 C:\Ruby34-x86\bin\ruby.exe --version >> %LOG% 2>&1
 echo ==^> 32-bit llvm version: >> %LOG%
@@ -178,7 +184,7 @@ echo ==^> Installing Cygwin with ruby, llvm, clang, and dev tools... >> %LOG%
 rem --root C:\cygwin64: explicit; without it --no-admin would redirect install to %USERPROFILE%\cygwin64
 rem no --no-admin: install.bat runs as SYSTEM/admin during first-boot OEM setup, so C:\cygwin64 is writable
 rem --local-package-dir C:\cygwin-pkgs: persistent cache, reused by the add-packages command above
-C:\cygwin-setup.exe --quiet-mode --no-shortcuts --root "C:\cygwin64" --site "https://mirrors.kernel.org/sourceware/cygwin/" --local-package-dir "C:\cygwin-pkgs" --packages ruby,ruby-devel,rubygems,ruby-irb,llvm,clang,make,gcc-core,libffi-devel,openssl-devel,zlib-devel,git,curl >> %LOG% 2>&1
+C:\cygwin-setup.exe --quiet-mode --no-shortcuts --root "C:\cygwin64" --site "https://mirrors.kernel.org/sourceware/cygwin/" --local-package-dir "C:\cygwin-pkgs" --packages ruby,ruby-devel,rubygems,llvm,libllvm-devel,clang,make,gcc-core,libffi-devel,libssl-devel,zlib-devel,git,curl >> %LOG% 2>&1
 echo ==^> Cygwin ruby version: >> %LOG%
 C:\cygwin64\bin\ruby.exe --version >> %LOG% 2>&1
 echo ==^> Cygwin llvm-config version: >> %LOG%
@@ -192,24 +198,25 @@ curl -L --retry 3 -o "%TEMP%\vs_buildtools.exe" "https://aka.ms/vs/17/release/vs
 rem --wait blocks until VS setup completes; required before any MSVC compilation
 "%TEMP%\vs_buildtools.exe" --wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended >> %LOG% 2>&1
 
-echo ==^> Downloading 7zr.exe (standalone 7-Zip for extracting mswin Ruby archive)... >> %LOG%
+echo ==^> Downloading 7zr.exe (handles .7z archives; needed to extract ruby-mswin.7z)... >> %LOG%
 curl -L --retry 3 -o "C:\7zr.exe" "https://www.7-zip.org/a/7zr.exe" >> %LOG% 2>&1
 
-echo ==^> Downloading mswin Ruby 3.4.9 (MSVC-based — no MSYS2/MinGW)... >> %LOG%
-rem from ruby/ruby-builder; if this 404s, check ruby/setup-ruby ruby-builder-versions.json for the current URL
-curl -L --retry 3 -o "%TEMP%\ruby-mswin.7z" "https://github.com/ruby/ruby-builder/releases/download/toolchain-local/ruby-3.4.9-x64-mswin64_140.7z" >> %LOG% 2>&1
+echo ==^> Downloading mswin Ruby from MSP-Greg/ruby-loco (MSVC trunk build, extracts to C:\ruby-mswin)... >> %LOG%
+rem only trunk builds available for mswin; same source used by setup-ruby for mswin head installs
+curl -L --retry 3 -o "%TEMP%\ruby-mswin.7z" "https://github.com/MSP-Greg/ruby-loco/releases/download/ruby-master/ruby-mswin.7z" >> %LOG% 2>&1
 echo ==^> Extracting mswin Ruby... >> %LOG%
 C:\7zr.exe x "%TEMP%\ruby-mswin.7z" -o"C:\" -y >> %LOG% 2>&1
-rem archive extracts to a versioned subdir; rename it to a stable path
-powershell -Command "Get-ChildItem 'C:\' -Directory | Where-Object { $_.Name -like 'ruby-3.4*mswin*' } | Select-Object -First 1 | Rename-Item -NewName 'Ruby34-mswin'" >> %LOG% 2>&1
 echo ==^> mswin ruby version: >> %LOG%
-C:\Ruby34-mswin\bin\ruby.exe --version >> %LOG% 2>&1
+C:\ruby-mswin\bin\ruby.exe --version >> %LOG% 2>&1
 
-echo ==^> Installing LLVM via winget (latest stable — provides llvm-config.exe for ruby-llvm)... >> %LOG%
-rem installs to C:\Program Files\LLVM and adds to system PATH; Gemfile-mswin pins ruby-llvm ~> 22 to match
-winget install LLVM.LLVM --silent --accept-package-agreements --accept-source-agreements >> %LOG% 2>&1
-echo ==^> mswin LLVM version: >> %LOG%
-"%ProgramFiles%\LLVM\bin\llvm-config.exe" --version >> %LOG% 2>&1
+echo ==^> mswin LLVM (via MSYS2 UCRT64, already installed above — no separate download needed): >> %LOG%
+rem libLLVM-22.dll from UCRT64 is a standard Windows DLL (same x64 calling convention, UCRT ABI);
+rem vsshell.bat queries ridk at runtime for the UCRT64 bin path and adds it to PATH.
+rem TODO: for a proper MSVC build, both sources below ship LLVM-C.dll + llvm-config + headers + .lib files,
+rem       but ffi_llvm_jit's ffi_lib list would need "LLVM-C" added (or a LLVM-22.dll hardlink to LLVM-C.dll):
+rem         https://github.com/c3lang/win-llvm/releases             (llvm-X.Y.Z-windows-amd64-msvc17-msvcrt.7z)
+rem         https://github.com/vovkos/llvm-package-windows/releases (also has x86 variant)
+call C:\Ruby34-x64\bin\ridk.cmd exec sh -c "llvm-config --version" >> %LOG% 2>&1
 
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
@@ -234,6 +241,58 @@ ENDBAT
 
 # echo ==^> Running bundle install (Cygwin)... >> %LOG%
 # C:\cygwin64\bin\bash.exe --login -c "cd /cygdrive/z && BUNDLE_GEMFILE=gemfiles/Gemfile-cygwin bundle install" >> %LOG% 2>&1
+
+# Win32-OpenSSH wraps every command in cmd /c "..." — any " inside closes the outer wrapper early,
+# breaking nested -Command "..." or -c "..." arguments. Bat files in STORAGE_DIR (served via Z:) let
+# each SSH command have zero inner quotes while the bat file itself can use " freely.
+cat > "${STORAGE_DIR}/shell-powershell.bat" << 'ENDPWSH'
+@echo off
+powershell.exe -NoExit -Command "& C:\Ruby34-x64\bin\ridk.ps1 enable; $env:PATH = 'C:\Ruby34-x64\bin;' + $env:PATH; $env:BUNDLE_GEMFILE = 'Z:\gemfiles\Gemfile-win'; Set-Location Z:"
+ENDPWSH
+
+cat > "${STORAGE_DIR}/shell-cmd.bat" << 'ENDCMD'
+@echo off
+set PATH=C:\Ruby34-x64\bin;%PATH%
+set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-win
+cd /d Z:\
+cmd
+ENDCMD
+
+cat > "${STORAGE_DIR}/shell-bash.bat" << 'ENDBASH'
+@echo off
+C:\Ruby34-x64\bin\ridk.cmd exec bash -c "export PATH=/c/Ruby34-x64/bin:$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win && cd /z && exec bash"
+ENDBASH
+
+cat > "${STORAGE_DIR}/shell-bash32.bat" << 'ENDBASH32'
+@echo off
+C:\Ruby34-x86\bin\ridk.cmd exec bash -c "export PATH=/c/Ruby34-x86/bin:$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win32 && cd /z && exec bash"
+ENDBASH32
+
+cat > "${STORAGE_DIR}/shell-cygwin.bat" << 'ENDCYGWIN'
+@echo off
+C:\cygwin64\bin\bash.exe --login -c "export BUNDLE_GEMFILE=/cygdrive/z/gemfiles/Gemfile-cygwin && cd /cygdrive/z && exec bash --login"
+ENDCYGWIN
+
+cat > "${STORAGE_DIR}/vsshell.bat" << 'ENDVSSHELL'
+@echo off
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64
+rem ridk knows where its bundled MSYS2 lives; cygpath -w converts the POSIX /ucrt64/bin to a Windows path.
+rem for /f "delims=" captures the full line (no field splitting); %%P receives e.g. C:\Ruby34-x64\msys64\ucrt64\bin.
+rem This puts libLLVM-22.dll and llvm-config.exe on PATH without hardcoding the MSYS2 install location.
+for /f "delims=" %%P in ('C:\Ruby34-x64\bin\ridk.cmd exec sh -c "cygpath -w /ucrt64/bin"') do set PATH=C:\ruby-mswin\bin;%%P;%PATH%
+set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-mswin
+powershell.exe -NoExit -Command Set-Location Z:\
+ENDVSSHELL
+
+cat > "${STORAGE_DIR}/vsshell-cmd.bat" << 'ENDVSCMD'
+@echo off
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64
+rem See vsshell.bat for an explanation of the for /f + cygpath trick.
+for /f "delims=" %%P in ('C:\Ruby34-x64\bin\ridk.cmd exec sh -c "cygpath -w /ucrt64/bin"') do set PATH=C:\ruby-mswin\bin;%%P;%PATH%
+set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-mswin
+cd /d Z:\
+cmd
+ENDVSCMD
 
 KVM_FLAG=""
 if [[ -e /dev/kvm ]]; then
@@ -331,44 +390,36 @@ echo "==> Connecting (project available at Z:\\)..."
 # needs its own remap; chaining it onto the remote command is simpler than fighting that.
 NET_USE_Z='net use Z: \\host.lan\Data /persistent:yes >nul 2>&1'
 SSH="ssh -t -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 Docker@localhost"
+# Win32-OpenSSH wraps every command in cmd /c "..." — any " inside closes the outer wrapper, so
+# nested -Command "..." or -c "..." all fail with "string is missing the terminator". Each case
+# calls a bat file in STORAGE_DIR (served as Z:) so the SSH string has zero inner quotes.
 case "$usage_shell" in
   cmd)
-    # Ruby bin added to PATH; BUNDLE_GEMFILE set here (BUNDLE_WITHOUT is persistent via setx in install.bat).
-    $SSH "${NET_USE_Z} & set PATH=C:\\Ruby34-x64\\bin;%PATH% & set BUNDLE_GEMFILE=Z:\\gemfiles\\Gemfile-win & cmd"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-cmd.bat"
     ;;
   bash)
-    # `ridk exec bash -c '...'` sets up MINGW64. Exported vars survive exec.
-    # /c/Ruby34-x64/bin is the MSYS2 path for C:\Ruby34-x64\bin (not in system PATH — modpath was omitted).
-    $SSH "${NET_USE_Z} & C:\\Ruby34-x64\\bin\\ridk.cmd exec bash -c 'export PATH=/c/Ruby34-x64/bin:\$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win && cd /z && exec bash'"
+    # MINGW64 environment; /c/Ruby34-x64/bin is the MSYS2 path for C:\Ruby34-x64\bin.
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-bash.bat"
     ;;
   bash32)
-    # Same as bash but uses the 32-bit Ruby (MINGW32 environment) to test stdcall calling convention.
-    $SSH "${NET_USE_Z} & C:\\Ruby34-x86\\bin\\ridk.cmd exec bash -c 'export PATH=/c/Ruby34-x86/bin:\$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win && cd /z && exec bash'"
+    # MINGW32 environment for 32-bit Ruby; Gemfile-win32 pins ruby-llvm ~> 21 (MSYS2 i686 max).
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-bash32.bat"
     ;;
   cygwin)
-    # Cygwin uses /cygdrive/z for the Z: drive. On Cygwin, td_errno = C errno and
-    # td_winapi_errno = GetLastError() — distinct channels, unlike native Windows.
-    # Cygwin Ruby is at /usr/bin/ruby (on PATH via --login). BUNDLE_WITHOUT is inherited from Windows env.
-    $SSH "${NET_USE_Z} & C:\\cygwin64\\bin\\bash.exe --login -c 'export BUNDLE_GEMFILE=/cygdrive/z/gemfiles/Gemfile-cygwin && cd /cygdrive/z && exec bash --login'"
+    # Cygwin: /cygdrive/z for Z:; td_errno = C errno, td_winapi_errno = GetLastError() (distinct channels).
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-cygwin.bat"
     ;;
   mswin)
-    # PowerShell with VS developer environment pre-activated for MSVC compilation.
-    # Enter-VsDevShell sets INCLUDE, LIB, PATH for the MSVC toolchain — without it native gems won't compile.
-    # LLVM (official installer) ends up at C:\Program Files\LLVM\bin — ruby-llvm ~> 18 needs llvm-config on PATH.
-    $SSH "${NET_USE_Z} & powershell.exe -NoExit -Command \"Import-Module 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll'; Enter-VsDevShell -VsInstallPath 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools' -SkipAutomaticLocation -DevCmdArguments '-arch=x64'; \$env:PATH = 'C:\\Ruby34-mswin\\bin;C:\\Program Files\\LLVM\\bin;' + \$env:PATH; \$env:BUNDLE_GEMFILE = 'Z:\\gemfiles\\Gemfile-mswin'; Set-Location Z:\\\""
+    # VS dev env + mswin Ruby + LLVM via MSYS2 UCRT64 (ridk-resolved path). PowerShell interactive.
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\vsshell.bat"
     ;;
   mswin-cmd)
-    # cmd.exe variant of mswin; VsDevCmd.bat activates the same MSVC environment as Enter-VsDevShell above.
-    $SSH "${NET_USE_Z} & set PATH=C:\\Ruby34-mswin\\bin;C:\\Program Files\\LLVM\\bin;%PATH% & set BUNDLE_GEMFILE=Z:\\gemfiles\\Gemfile-mswin & call \"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" & cmd"
+    # Same as mswin but drops into cmd.exe instead of PowerShell.
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\vsshell-cmd.bat"
     ;;
   *)
-    # ridk.ps1 is a separate script from ridk.cmd: PowerShell runs .ps1 files in-process
-    # (new scope, not a new process), so the $env:PATH etc. it sets via Invoke-Expression
-    # survive into the interactive prompt that -NoExit drops into afterward. Must reference
-    # the .ps1 explicitly — bare `ridk` would resolve to ridk.cmd, since .PS1 isn't in
-    # %PATHEXT% by default. No spaces in the path, so it doesn't need its own quoting.
-    # BUNDLE_WITHOUT is inherited from Windows env (set via setx in install.bat).
-    $SSH "${NET_USE_Z} & powershell.exe -NoExit -Command \"& C:\\Ruby34-x64\\bin\\ridk.ps1 enable; \$env:PATH = 'C:\\Ruby34-x64\\bin;' + \$env:PATH; \$env:BUNDLE_GEMFILE = 'Z:\\gemfiles\\Gemfile-win'; Set-Location Z:\\\""
+    # Default PowerShell: ridk.ps1 runs in-process (unlike ridk.cmd) so $env: changes survive into -NoExit.
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-powershell.bat"
     ;;
 esac
 

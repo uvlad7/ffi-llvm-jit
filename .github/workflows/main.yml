@@ -20,6 +20,8 @@ on:
 # TODO: test mswin ruby build (plus llvm from choco probably)
 # TODO: add Cygwin as a test target — on Cygwin, FFI.errno is C errno and FFI::LastError.winapi_error
 #   is GetLastError(), so they are distinct and both should be tested in the errno specs
+# TODO: proper llvm for msvc; needs ruby-llvm fixes
+# TODO: arm windows
 jobs:
   simple:
     runs-on: ${{ matrix.os }}

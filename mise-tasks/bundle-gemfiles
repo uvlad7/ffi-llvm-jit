@@ -20,8 +20,9 @@ for gemfile in gemfiles/Gemfile-*; do
   name="${gemfile#gemfiles/Gemfile-}"
   ruby_version=$(echo "${name}" | sed -nE 's/.*ruby_([0-9]+(_[0-9]+)*).*/\1/p' | tr '_' '.')
   [[ "${name}" == "win" ]] && ruby_version="3.4"
+  [[ "${name}" == "win32" ]] && ruby_version="3.4"
   [[ "${name}" == "cygwin" ]] && ruby_version="4.0"
-  [[ "${name}" == "mswin" ]] && ruby_version="3.4"
+  [[ "${name}" == "mswin" ]] && ruby_version="4.1-dev"
   run_bundle "${gemfile}" "${ruby_version:-3.3}"
 done
 
