@@ -49,6 +49,13 @@ module FFI
       )
       # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
+      # TODO: wrong on mswin
+# RbConfig::CONFIG host_cpu=x64 target_cpu=x64
+# RbConfig::CONFIG host_os=mswin64_140 target_os=mswin64_140
+# RbConfig::MAKEFILE_CONFIG host_cpu=$(target_cpu) target_cpu=x64
+# RbConfig::MAKEFILE_CONFIG host_os=$(target_os) target_os=mswin64_140
+# LLVM default triple: x86_64-w64-windows-gnu
+# LLVM_MOD triple: x86_64-pc-windows-msvc19.44.35228
       LLVM_TRIPLE = LLVM::C.get_default_target_triple.split('-', 3).freeze
 
         $stderr.puts "CONFIG DEBUG"
@@ -108,11 +115,28 @@ module FFI
       #   end
       # end
 
+      if Gem.win_platform?
+        # load_library_permanently(nil) restricts SearchForAddressOfSymbol to registered libs,
+        # so it must run before the unresolved check (not after).
+        LLVM::C.load_library_permanently(nil)
+        # Load this extension DLL so its exported __security_check_cookie
+        # (from bufferoverflowU.lib) is findable by the JIT symbol resolver.
+        LLVM::C.load_library_permanently(
+          File.expand_path("llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__)
+        )
+      end
+
       # Validate all external declarations in the bitcode module are resolved.
-      # LLVM intrinsics (llvm.*) are handled natively by the JIT and not in the symbol table.
+      # LLVMParseBitcode is eager so the module is fully materialized here.
+      # Must run after load_library_permanently but before function_address,
+      # which triggers JIT and dies with a fatal LLVM error on missing symbols.
+      # LLVM intrinsics (llvm.*) are handled natively by the JIT.
       unresolved = LLVM_MOD.functions.select do |f|
         f.declaration?.nonzero? && !f.name.start_with?('llvm.') &&
           LLVM::C.search_for_address_of_symbol(f.name).null?
+      end + LLVM_MOD.globals.select do |g|
+        g.declaration?.nonzero? &&
+          LLVM::C.search_for_address_of_symbol(g.name).null?
       end
       raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
 
@@ -122,17 +146,20 @@ module FFI
       # functions (ffi_llvm_jit_value_to_string etc.) resolve to address 0,
       # causing a segfault on first call. Pre-compile and register all symbols.
       if Gem.win_platform?
-        LLVM::C.load_library_permanently(nil)
         LLVM_MOD.functions.reject { |f| f.declaration?.nonzero? }.each do |f|
-          addr = LLVM_ENG.function_address(f.name)
-          LLVM::C.add_symbol(f.name, FFI::Pointer.new(addr)) unless addr.zero?
+          LLVM_ENG.function_address(f.name)
         end
-        qnil_glob = LLVM_MOD.globals['ffi_llvm_jit_Qnil']
-        if qnil_glob
-          qnil_ptr = LLVM_ENG.pointer_to_global(qnil_glob)
-          LLVM::C.add_symbol('ffi_llvm_jit_Qnil', qnil_ptr) unless qnil_ptr.null?
-        end
+        LLVM_ENG.pointer_to_global(LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
       end
+
+          unresolved = LLVM_MOD.functions.select do |f|
+        f.declaration?.nonzero? && !f.name.start_with?('llvm.') &&
+          LLVM::C.search_for_address_of_symbol(f.name).null?
+      end + LLVM_MOD.globals.select do |g|
+        g.declaration?.nonzero? &&
+          LLVM::C.search_for_address_of_symbol(g.name).null?
+      end
+      raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
 
       private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX, :LLVM_TRIPLE
 

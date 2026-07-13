@@ -101,6 +101,11 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     end.to raise_error(TypeError, "unable to resolve type 'length'")
   end
 
+  let(:nil_to_integer_msg) do
+    # Changed in 4.1
+    /\A(?:no implicit conversion from nil to integer|no implicit conversion of nil into Integer)\z/
+  end
+
   it 'supports enums' do
     jitlib.enum [:a, :b, 2]
     jitlib.attach_llvm_jit_function(:spec_enum, %i[int string], :int)
@@ -113,7 +118,7 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     end.to raise_error(TypeError, 'no implicit conversion of Symbol into String')
     expect do
       jitlib.spec_enum(:c, nil)
-    end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
+    end.to raise_error(TypeError, nil_to_integer_msg)
     jitlib.enum [:c, 42]
     # test it uses the same object and is affected by further changes
     expect(jitlib.spec_enum(:c, nil)).to eq(42)
@@ -123,13 +128,13 @@ RSpec.describe FFI::LLVMJIT do # rubocop:disable Metrics/BlockLength
     expect(jitlib.attach_llvm_jit_function(:spec_enum_cust, :spec_enum, %i[int string], :int, enums: enums)).to be_nil
     expect do
       jitlib.spec_enum_cust(:c, nil)
-    end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
+    end.to raise_error(TypeError, nil_to_integer_msg)
     expect(jitlib.spec_enum_cust(:v, nil)).to eq(42)
 
     includer = Class.new.tap { |cls| cls.include(jitlib) }.new
     expect do
       includer.spec_enum_cust(:c, nil)
-    end.to raise_error(TypeError, 'no implicit conversion from nil to integer')
+    end.to raise_error(TypeError, nil_to_integer_msg)
     expect(includer.spec_enum_cust(:v, nil)).to eq(42)
   end
 

@@ -56,8 +56,14 @@ extern VALUE ffi_llvm_jit_save_frame_exception(VALUE data, VALUE exc);
 /* LLVM's StackProtector codegen pass on Windows COFF inserts __stack_chk_fail
  * references even when the IR has no SSP attributes. Define both symbols here
  * so MCJIT resolves them within LLVM_MOD without needing an external library. */
-volatile uintptr_t __stack_chk_guard = 0x595e9fbd94fda766ULL;
-__attribute__((noreturn)) void __stack_chk_fail(void) { __builtin_trap(); }
+// volatile uintptr_t __stack_chk_guard = 0x595e9fbd94fda766ULL;
+// __attribute__((noreturn)) void __stack_chk_fail(void) { __builtin_trap(); }
+
+// /* clang-cl /GS (buffer security check) inserts __security_check_cookie references.
+//  * Define stub symbols so MCJIT resolves them without needing the MSVC runtime. */
+// uintptr_t __security_cookie = 0x595e9fbd94fda767ULL;
+// uintptr_t __security_cookie_complement = ~(uintptr_t)0x595e9fbd94fda767ULL;
+// void __cdecl __security_check_cookie(uintptr_t cookie) { (void)cookie; }
 
 // Future: APC-based UBF for interruptible alertable waits — see llvm_bitcode.c.
 // static void CALLBACK ffi_llvm_jit_win32_empty_apc(ULONG_PTR param) { (void)param; }

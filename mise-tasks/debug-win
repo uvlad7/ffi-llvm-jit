@@ -209,6 +209,11 @@ C:\7zr.exe x "%TEMP%\ruby-mswin.7z" -o"C:\" -y >> %LOG% 2>&1
 echo ==^> mswin ruby version: >> %LOG%
 C:\ruby-mswin\bin\ruby.exe --version >> %LOG% 2>&1
 
+echo ==^> Downloading vcpkg x64-windows packages (libffi + pkgconf — required for ffi gem system-libffi build on mswin; bundled libffi in ffi 1.17+ dropped Makefile.vc64)... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\vcpkg-x64-windows.7z" "https://github.com/ruby/setup-msys2-gcc/releases/latest/download/vcpkg-x64-windows.7z" >> %LOG% 2>&1
+echo ==^> Extracting vcpkg packages to C:\vcpkg-ruby... >> %LOG%
+C:\7zr.exe x "%TEMP%\vcpkg-x64-windows.7z" -o"C:\vcpkg-ruby" -y >> %LOG% 2>&1
+
 echo ==^> mswin LLVM (via MSYS2 UCRT64, already installed above — no separate download needed): >> %LOG%
 rem libLLVM-22.dll from UCRT64 is a standard Windows DLL (same x64 calling convention, UCRT ABI);
 rem vsshell.bat queries ridk at runtime for the UCRT64 bin path and adds it to PATH.
@@ -280,6 +285,13 @@ rem ridk knows where its bundled MSYS2 lives; cygpath -w converts the POSIX /ucr
 rem for /f "delims=" captures the full line (no field splitting); %%P receives e.g. C:\Ruby34-x64\msys64\ucrt64\bin.
 rem This puts libLLVM-22.dll and llvm-config.exe on PATH without hardcoding the MSYS2 install location.
 for /f "delims=" %%P in ('C:\Ruby34-x64\bin\ridk.cmd exec sh -c "cygpath -w /ucrt64/bin"') do set PATH=C:\ruby-mswin\bin;%%P;%PATH%
+rem vcpkg-ruby: pre-built MSVC-compatible libffi + pkgconf downloaded by install.bat.
+rem ffi gem's extconf detects system libffi via INCLUDE/LIB and skips the bundled build (which
+rem lost Makefile.vc64 in ffi 1.17+). PKG_CONFIG_PATH lets pkg_config("libffi") succeed first.
+set INCLUDE=C:\vcpkg-ruby\installed\x64-windows\include;%INCLUDE%
+set LIB=C:\vcpkg-ruby\installed\x64-windows\lib;%LIB%
+set PKG_CONFIG_PATH=C:\vcpkg-ruby\installed\x64-windows\lib\pkgconfig
+set PATH=C:\vcpkg-ruby\installed\x64-windows\tools\pkgconf;C:\vcpkg-ruby\installed\x64-windows\bin;%PATH%
 set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-mswin
 powershell.exe -NoExit -Command Set-Location Z:\
 ENDVSSHELL
@@ -289,6 +301,11 @@ cat > "${STORAGE_DIR}/vsshell-cmd.bat" << 'ENDVSCMD'
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64
 rem See vsshell.bat for an explanation of the for /f + cygpath trick.
 for /f "delims=" %%P in ('C:\Ruby34-x64\bin\ridk.cmd exec sh -c "cygpath -w /ucrt64/bin"') do set PATH=C:\ruby-mswin\bin;%%P;%PATH%
+rem See vsshell.bat for an explanation of the vcpkg-ruby paths.
+set INCLUDE=C:\vcpkg-ruby\installed\x64-windows\include;%INCLUDE%
+set LIB=C:\vcpkg-ruby\installed\x64-windows\lib;%LIB%
+set PKG_CONFIG_PATH=C:\vcpkg-ruby\installed\x64-windows\lib\pkgconfig
+set PATH=C:\vcpkg-ruby\installed\x64-windows\tools\pkgconf;C:\vcpkg-ruby\installed\x64-windows\bin;%PATH%
 set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-mswin
 cd /d Z:\
 cmd

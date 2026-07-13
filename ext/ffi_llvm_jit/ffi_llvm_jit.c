@@ -1,5 +1,13 @@
 #include "ffi_llvm_jit.h"
 
+#ifdef _MSC_VER
+/* Re-export __security_check_cookie from bufferoverflowU.lib so LLVM's JIT can
+ * resolve it via load_library_permanently on this DLL. */
+#pragma comment(linker, "/EXPORT:__security_check_cookie")
+#pragma comment(linker, "/EXPORT:__security_cookie,DATA")
+#pragma comment(linker, "/EXPORT:__security_cookie_complement,DATA")
+#endif
+
 VALUE rb_mFFI;
 VALUE rb_mFFILLVMJIT;
 VALUE rb_mFFILLVMJITLibrary;
