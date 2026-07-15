@@ -18,11 +18,39 @@ require 'llvm/core'
 module LLVM
   class LLJit
     def initialize
-      builder = C.create_lljit_builder
       out = FFI::MemoryPointer.new(:pointer)
+      builder = C.create_lljit_builder
+
+      # On MSVC Ruby (mswin) the system LLVM (from UCRT64/MSYS2) has default triple
+      # x86_64-w64-windows-gnu.  MSVC's longjmp calls RtlUnwindEx, which requires
+      # .pdata unwind tables in Windows MSVC format for every frame on the stack.
+      # JITLink generates the right .pdata only when the target triple is the MSVC
+      # variant; override before building LLJIT.
+      if RbConfig::CONFIG['host_os'] =~ /mswin/i
+        jtmb_out = FFI::MemoryPointer.new(:pointer)
+        err = C.jtmb_detect_host(jtmb_out)
+        raise_if_error(err)
+        jtmb = jtmb_out.read_pointer
+        $stderr.puts "LLJIT: detected triple=#{C.jtmb_get_target_triple(jtmb)}"
+        C.jtmb_set_target_triple(jtmb, 'x86_64-pc-windows-msvc')
+        $stderr.puts "LLJIT: override triple=#{C.jtmb_get_target_triple(jtmb)}"
+        C.lljit_builder_set_jtmb(builder, jtmb)
+      end
+
       err = C.create_lljit(out, builder)
       raise_if_error(err)
       @ptr = out.read_pointer
+
+      # Print the raw JITLink error before ORC wraps it in "Failed to materialize symbols".
+      # The error reporter fires on background/async errors; synchronous lookup errors
+      # go through raise_if_error, but the underlying cause is reported here first.
+      @_error_reporter_cb = FFI::Function.new(:void, [:pointer, :pointer]) do |_ctx, err_ref|
+        msg = C.get_error_message(err_ref)
+        $stderr.puts "JITLink error: #{msg}"
+        C.dispose_error_message(msg)
+      end
+      es = C.get_execution_session(@ptr)
+      C.set_error_reporter(es, @_error_reporter_cb, nil)
 
       dylib = C.get_main_jit_dylib(@ptr)
       gen_out = FFI::MemoryPointer.new(:pointer)
@@ -59,6 +87,29 @@ module LLVM
       @ptr = nil
     end
 
+    # Add a symbol generator that searches a specific DLL by file path.
+    def add_dll_generator(path)
+      gen_out = FFI::MemoryPointer.new(:pointer)
+      err = C.create_dll_generator_for_path(gen_out, path, C.get_global_prefix(@ptr), nil, nil)
+      raise_if_error(err)
+      C.dylib_add_generator(C.get_main_jit_dylib(@ptr), gen_out.read_pointer)
+    end
+
+    # Define one symbol as an absolute address in the main JITDylib.
+    # LLVMOrcCSymbolMapPair layout (64-bit): 8 (ptr Name) + 8 (uint64 Address) +
+    #   1 (uint8 GenericFlags) + 1 (uint8 TargetFlags) + 6 pad = 24 bytes.
+    # LLVMOrcAbsoluteSymbols consumes the interned name ref; do not release it.
+    def add_absolute_symbol(name, address, exported: true)
+      pair = FFI::MemoryPointer.new(24)
+      pair.put_pointer(0, C.mangle_and_intern(@ptr, name))
+      pair.put_uint64(8, address)
+      pair.put_uint8(16, exported ? 1 : 0)
+      pair.put_uint8(17, 0)
+      mu = C.absolute_symbols_mu(pair, 1)
+      err = C.jitdylib_define(C.get_main_jit_dylib(@ptr), mu)
+      raise_if_error(err)
+    end
+
     private
 
     def raise_if_error(err)
@@ -75,7 +126,16 @@ module LLVM
                "libLLVM.so.#{_ver}.1", "libLLVM-#{_ver}.dll"]
 
       attach_function :create_lljit_builder, :LLVMOrcCreateLLJITBuilder, [], :pointer
-      attach_function :create_lljit,         :LLVMOrcCreateLLJIT,          [:pointer, :pointer], :pointer
+      # JIT Target Machine Builder — used to override the default host triple on mswin.
+      attach_function :jtmb_detect_host, :LLVMOrcJITTargetMachineBuilderDetectHost,
+                      [:pointer], :pointer
+      attach_function :jtmb_get_target_triple, :LLVMOrcJITTargetMachineBuilderGetTargetTriple,
+                      [:pointer], :string
+      attach_function :jtmb_set_target_triple, :LLVMOrcJITTargetMachineBuilderSetTargetTriple,
+                      [:pointer, :string], :void
+      attach_function :lljit_builder_set_jtmb, :LLVMOrcLLJITBuilderSetJITTargetMachineBuilder,
+                      [:pointer, :pointer], :void
+      attach_function :create_lljit, :LLVMOrcCreateLLJIT, [:pointer, :pointer], :pointer
       attach_function :dispose_lljit,        :LLVMOrcDisposeLLJIT,         [:pointer], :pointer
       attach_function :get_main_jit_dylib,   :LLVMOrcLLJITGetMainJITDylib, [:pointer], :pointer
       attach_function :get_global_prefix,    :LLVMOrcLLJITGetGlobalPrefix,  [:pointer], :char
@@ -99,8 +159,39 @@ module LLVM
 
       attach_function :dylib_add_generator, :LLVMOrcJITDylibAddGenerator, [:pointer, :pointer], :void
 
+      # LLVMErrorRef LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(
+      #   LLVMOrcDefinitionGeneratorRef *Result, const char *Path,
+      #   char GlobalPrefix, LLVMOrcSymbolPredicate Filter, void *FilterCtx)
+      attach_function :create_dll_generator_for_path,
+                      :LLVMOrcCreateDynamicLibrarySearchGeneratorForPath,
+                      [:pointer, :string, :char, :pointer, :pointer], :pointer
+
+      # Intern a symbol name through the LLJIT's mangler (applies global prefix).
+      # Returns LLVMOrcSymbolStringPoolEntryRef — caller owns one ref.
+      # LLVMOrcAbsoluteSymbols consumes the ref, so don't release after passing.
+      attach_function :mangle_and_intern, :LLVMOrcLLJITMangleAndIntern, [:pointer, :string], :pointer
+
+      # LLVMOrcMaterializationUnitRef LLVMOrcAbsoluteSymbols(
+      #   LLVMOrcCSymbolMapPairs Syms, size_t NumPairs)
+      # Syms is an array of { LLVMOrcSymbolStringPoolEntryRef Name (ptr),
+      #                        LLVMJITEvaluatedSymbol { uint64 Address, uint8 GenericFlags, uint8 TargetFlags } }
+      # struct size: 8 (ptr) + 8 (addr) + 1 + 1 + 6 pad = 24 bytes per pair (64-bit).
+      attach_function :absolute_symbols_mu, :LLVMOrcAbsoluteSymbols, [:pointer, :size_t], :pointer
+
+      # LLVMErrorRef LLVMOrcJITDylibDefine(LLVMOrcJITDylibRef JD, LLVMOrcMaterializationUnitRef MU)
+      attach_function :jitdylib_define, :LLVMOrcJITDylibDefine, [:pointer, :pointer], :pointer
+
       attach_function :get_error_message,     :LLVMGetErrorMessage,     [:pointer], :string
       attach_function :dispose_error_message, :LLVMDisposeErrorMessage, [:string],  :void
+
+      attach_function :get_execution_session, :LLVMOrcLLJITGetExecutionSession, [:pointer], :pointer
+      # void LLVMOrcExecutionSessionSetErrorReporter(
+      #   LLVMOrcExecutionSessionRef ES,
+      #   void (*ReportError)(void *Ctx, LLVMErrorRef Err),
+      #   void *Ctx)
+      attach_function :set_error_reporter,
+                      :LLVMOrcExecutionSessionSetErrorReporter,
+                      [:pointer, :pointer, :pointer], :void
     end
   end
 end

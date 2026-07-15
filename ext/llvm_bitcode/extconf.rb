@@ -73,7 +73,41 @@ if RbConfig::CONFIG['host_os'] =~ /mswin/i
   # space-before-command means the script runs but IO/FileUtils writes go nowhere visible).
   # Replace the link recipe with native Windows `copy`: bitcode is already in $(OBJS),
   # just copy it to the $(@) target — no linking needed for LLVM bitcode.
+  find_llvm_tool = lambda do |name|
+    ver = File.join(llvm_bindir, "#{name}-#{LLVM::LLVM_VERSION}")
+    plain = File.join(llvm_bindir, name)
+    (File.exist?("#{ver}.exe") ? ver : plain).tr('/', '\\')
+  end
+  llvm_dis = find_llvm_tool.call('llvm-dis')
+  llvm_as  = find_llvm_tool.call('llvm-as')
+
+  # Strip COMDAT string literals from the MSVC-target bitcode so JITLink can
+  # compile the module. clang-cl in MSVC ABI mode emits string literals as
+  # linkonce_odr comdat globals (??_C@... names); JITLink's COFF backend
+  # fails when it encounters COMDAT sections in a JIT-compiled module.
+  # post-process: bitcode → IR text → strip comdat → reassemble → bitcode.
+  strip_script = <<~'RUBY'
+    ir = File.binread(ARGV[0]).gsub("\r\n", "\n")   # normalize CRLF
+    ir.gsub!(/^\$"[^"]*" = comdat [^\n]+\n/, '')    # remove comdat declarations
+    ir.gsub!(/, comdat(\([^)]*\))?/, '')             # remove comdat attribute
+    # Change linkonce_odr to private on global variable lines (@name = linkonce_odr ...)
+    # but NOT on function definitions (those start with 'define', not '@').
+    ir.gsub!(/^(@(?:"[^"]*"|[^\s]+) = )linkonce_odr /) { "#{$1}private " }
+    File.binwrite(ARGV[0], ir)
+  RUBY
+  strip_script_path = File.expand_path('strip_comdat.rb', __dir__).tr('/', '\\')
+  File.write(File.expand_path('strip_comdat.rb', __dir__), strip_script)
+
   mf = File.read('Makefile')
-  mf.sub!(/^\t\$\(Q\) \$\(LDSHARED\).*$/, "\tcopy $(OBJS) $(@) >NUL")
+  # Compile produces bitcode in $(OBJS); dis → strip comdat → as → final target.
+  mf.sub!(/^\t\$\(Q\) \$\(LDSHARED\).*$/) do
+    obj = '$(OBJS)'
+    ll  = '$(OBJS:.obj=.ll)'
+    [
+      "\t#{llvm_dis} #{obj} -o #{ll}",
+      "\t$(RUBY) \"#{strip_script_path}\" #{ll}",
+      "\t#{llvm_as} #{ll} -o $(@)",
+    ].join("\n")
+  end
   File.write('Makefile', mf)
 end

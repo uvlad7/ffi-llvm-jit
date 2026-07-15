@@ -10,6 +10,7 @@ require 'llvm/execution_engine'
 
 require_relative 'llvm_jit/version'
 require_relative 'llvm_jit/ffi_llvm_jit'
+require_relative 'llvm_jit/lljit' if Gem.win_platform?
 
 module FFI
   # https://llvm.org/doxygen/group__LLVMCCoreModule.html
@@ -103,8 +104,50 @@ module FFI
         LLVM::C.llvm_initialize_native_asm_parser
       end
 
-      LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
+      if Gem.win_platform?
+        # Diagnostic: inspect what RtlAddFunctionTable base JITLink uses for .pdata.
+        module NtDll
+          extend FFI::Library
+          ffi_lib 'ntdll'
+          # PRUNTIME_FUNCTION RtlLookupFunctionEntry(DWORD64 ControlPc, PDWORD64 ImageBase, PVOID HistoryTable)
+          attach_function :lookup_function_entry, :RtlLookupFunctionEntry, [:uint64, :pointer, :pointer], :pointer
+        end
+
+        LLVM_ENG = LLVM::LLJit.new
+
+        ffi_ext = File.expand_path("llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__)
+
+        # load_library_permanently populates LLVM's DynamicLibrary table used by
+        # search_for_address_of_symbol (the unresolved check below).
+        LLVM::C.load_library_permanently(nil)
+        LLVM::C.load_library_permanently(ffi_ext)
+
+        # GCC-style SSP symbols from -fstack-protector-strong in Ruby's $CFLAGS.
+        # Not exported from any MSVC DLL. add_symbol populates LLVM's DynamicLibrary
+        # table (for the unresolved check below). add_absolute_symbol puts them
+        # directly in the JITDylib — on Windows the ORC process generator uses
+        # GetProcAddress and won't find manually-added DynamicLibrary entries.
+        @ssp_guard = FFI::MemoryPointer.new(:uint64)
+        @ssp_guard.write_uint64(rand(2**64))
+        LLVM::C.add_symbol('__stack_chk_guard', @ssp_guard)
+        LLVM_ENG.add_absolute_symbol('__stack_chk_guard', @ssp_guard.address)
+        @ssp_fail = FFI::Function.new(:void, []) { abort 'stack smashing detected' }
+        LLVM::C.add_symbol('__stack_chk_fail', @ssp_fail)
+        LLVM_ENG.add_absolute_symbol('__stack_chk_fail', @ssp_fail.address)
+
+        # LLJIT resolves externals via generators; also add the extension DLL.
+        LLVM_ENG.add_dll_generator(ffi_ext)
+
+        # add_module transfers ownership; clone LLVM_MOD so it remains usable for
+        # type/function lookups after this point.
+        LLVM_ENG.add_module(LLVM_MOD.clone_module)
+      else
+        LLVM_ENG = LLVM::JITCompiler.new(LLVM_MOD, opt_level: 3)
+      end
       LLVM_MUTEX = Mutex.new
+      LLVM_FUNC_SEQ = [0]
+      # One-time flag: have we registered .pdata for all base-module JIT helpers?
+      JIT_HELPER_PDATA_DONE = [false]
 
       # Future: register kernel32 symbols for the APC-based UBF — see llvm_bitcode.c.
       # if Gem.win_platform?
@@ -114,17 +157,6 @@ module FFI
       #     LLVM::C.add_symbol(sym, addr) if addr && !addr.null?
       #   end
       # end
-
-      if Gem.win_platform?
-        # load_library_permanently(nil) restricts SearchForAddressOfSymbol to registered libs,
-        # so it must run before the unresolved check (not after).
-        LLVM::C.load_library_permanently(nil)
-        # Load this extension DLL so its exported __security_check_cookie
-        # (from bufferoverflowU.lib) is findable by the JIT symbol resolver.
-        LLVM::C.load_library_permanently(
-          File.expand_path("llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__)
-        )
-      end
 
       # Validate all external declarations in the bitcode module are resolved.
       # LLVMParseBitcode is eager so the module is fully materialized here.
@@ -140,28 +172,7 @@ module FFI
       end
       raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
 
-      # On Windows (COFF), RuntimeDyldCOFF does not use lazy PLT stubs for
-      # unresolved cross-module references. If LLVM_MOD is not yet compiled
-      # when a llvm_mod wrapper is finalized, its references to bitcode
-      # functions (ffi_llvm_jit_value_to_string etc.) resolve to address 0,
-      # causing a segfault on first call. Pre-compile and register all symbols.
-      if Gem.win_platform?
-        LLVM_MOD.functions.reject { |f| f.declaration?.nonzero? }.each do |f|
-          LLVM_ENG.function_address(f.name)
-        end
-        LLVM_ENG.pointer_to_global(LLVM_MOD.globals['ffi_llvm_jit_Qnil'])
-      end
-
-          unresolved = LLVM_MOD.functions.select do |f|
-        f.declaration?.nonzero? && !f.name.start_with?('llvm.') &&
-          LLVM::C.search_for_address_of_symbol(f.name).null?
-      end + LLVM_MOD.globals.select do |g|
-        g.declaration?.nonzero? &&
-          LLVM::C.search_for_address_of_symbol(g.name).null?
-      end
-      raise "Unresolved JIT symbols: #{unresolved.map(&:name).join(', ')}" unless unresolved.empty?
-
-      private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX, :LLVM_TRIPLE
+      private_constant :LLVM_MOD, :LLVM_ENG, :LLVM_MUTEX, :LLVM_FUNC_SEQ, :LLVM_TRIPLE, :JIT_HELPER_PDATA_DONE
 
       # LLVM_ENG.dispose is never called
       # https://llvm.org/doxygen/group__LLVMCTarget.html#gaaa9ce583969eb8754512e70ec4b80061
@@ -179,15 +190,29 @@ module FFI
       # from_type raises in v21 on null ptr so we need to check explicitly
       blocking_call_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_blocking_call_t')
       blocking_call_t = LLVM::Type.from_ptr(blocking_call_t_ptr) unless blocking_call_t_ptr.null?
-      BLOCKING_CALL_T = blocking_call_t || LLVM::Struct(
-        LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
-        VOID_PTR_T,
-      )
+      # TODO: with all keepalives type are kept - avoid fallbacks but raise if type isn't fould (LLVM::Type.from_ptr(NULL) is safe, just check later)
+      BLOCKING_CALL_T = blocking_call_t || if Gem.win_platform?
+        # 3 fields: call_blocking_function_fn, params_store, exc_store (VALUE).
+        # Defined here rather than taken from the bitcode because FFI_LLVM_JIT_WIN_PLATFORM
+        # may not be set during clang-cl bitcode compilation, leaving only 2 fields there.
+        LLVM::Struct(
+          LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
+          VOID_PTR_T,
+          VALUE,
+        )
+      else
+        LLVM::Struct(
+          LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
+          VOID_PTR_T,
+        )
+      end
 
       unless Gem.win_platform?
         # ffi_llvm_jit_frame_t: { td: ptr, prev: ptr, exc: VALUE }
         # Windows omits td but frame push/pop/save_frame_exception are unused there.
         frame_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_frame')
+        require 'pry'
+        binding.pry
         frame_t = LLVM::Type.from_ptr(frame_t_ptr) unless frame_t_ptr.null?
         $stderr.puts "ffi_llvm_jit: FRAME_T from bitcode=#{!frame_t.nil?}"
         FRAME_T = frame_t || LLVM::Struct(VOID_PTR_T, VOID_PTR_T, VALUE)
@@ -478,8 +503,17 @@ module FFI
       # rubocop:enable Metrics/ParameterLists
 
       def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
+        $stderr.puts "JIT: build #{rb_name}(#{arg_type_names.join(',')}) -> #{ret_type_name} blocking=#{blocking}"; $stderr.flush
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
+        # Match triple and data layout to the bitcode module so JITLink selects the correct
+        # object format and .pdata handling (MSVC COFF on mswin, ELF on Linux, etc.).
+        # LLVM::Module.new leaves the triple empty, which causes JITLink to fall back to
+        # defaults that may not match the LLJIT's configured target on Windows.
+        if Gem.win_platform?
+          llvm_mod.triple = LLVM_MOD.triple
+          llvm_mod.data_layout = LLVM_MOD.data_layout
+        end
         # string -> LLVM.Pointer; size_t -> LLVM::Int64
         arg_types = arg_type_names.map { |arg_type| LLVM_TYPES[arg_type] }
         ret_type = LLVM_TYPES[ret_type_name]
@@ -495,12 +529,20 @@ module FFI
         end
         void_ret = ret_type_name == :void
 
+        # Pre-compute the sequence number so both the outer wrapper and the inner
+        # blocking body can share a predictable naming scheme.  The outer function
+        # consumes this number with LLVM_FUNC_SEQ[0] += 1 below.
+        _func_seq = LLVM_FUNC_SEQ[0] + 1
+
         if blocking
           params_store_fields = [*arg_types, *(ret_type unless void_ret)]
           # Note: If StructByValue is ever supported we might want not to copy big structs and store a ptr instead
           params_store_t = LLVM.Struct(*params_store_fields) unless params_store_fields.empty?
+          # Named (non-private) so we can call function_address on it and register
+          # .pdata; on MSVC x64, RtlUnwindEx must unwind through this frame when the
+          # blocking call is interrupted (e.g. via APC/UBF during SleepEx).
           call_blocking_func = llvm_mod.functions.add(
-            '', [VOID_PTR_T], VOID_PTR_T,
+            "rb_llvm_jit_wrap_#{rb_name}_#{_func_seq}_body", [VOID_PTR_T], VOID_PTR_T,
           ) do |llvm_function, params_store|
             llvm_function.basic_blocks.append('entry').build do |builder|
               converted_params = arg_types.map.with_index do |t, i|
@@ -523,7 +565,7 @@ module FFI
         # update rb_func.name=, function_address is still zero
         # Upd: It happens if functions are the same even though their names are different
         rb_func = llvm_mod.functions.add(
-          :"rb_llvm_jit_wrap_#{rb_name}_#{llvm_mod.to_ptr.address}", [VALUE] * (1 + arg_type_names.size), VALUE,
+          :"rb_llvm_jit_wrap_#{rb_name}_#{LLVM_FUNC_SEQ[0] += 1}", [VALUE] * (1 + arg_type_names.size), VALUE,
         ) do |llvm_function, _rb_self, *params|
           llvm_function.basic_blocks.append('entry').build do |builder|
             # less readable, but easier that to position builder
@@ -531,7 +573,6 @@ module FFI
             if blocking
               params_store = builder.alloca(params_store_t) if params_store_t
               call_data = builder.alloca(BLOCKING_CALL_T)
-              exc_store = builder.alloca(VALUE) if Gem.win_platform?
             end
             # No zero-init needed (unlike C's `rbffi_frame_t frame = { 0 }`):
             # rbffi_frame_push does memset(frame, 0, sizeof(*frame)) before any read.
@@ -544,7 +585,7 @@ module FFI
             end
             if blocking
               emit_blocking_call(
-                builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func,
+                builder, llvm_mod, params_store_t, frame, converted_params, call_blocking_func,
                 params_store, call_data,
               )
               res = void_ret ? nil : builder.load2(
@@ -557,7 +598,8 @@ module FFI
             builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless Gem.win_platform?
             if Gem.win_platform?
               if blocking
-                builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load(exc_store))
+                exc_gep = builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(2)], '')
+                builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load2(VALUE, exc_gep))
               end
             else
               exc = builder.load2(VALUE, builder.gep2(FRAME_T, frame, [LLVM::Int(0), LLVM::Int(FRAME_EXC_INDEX)], ''))
@@ -578,32 +620,109 @@ module FFI
           end
         end
 
-        rb_func_addr = LLVM_MUTEX.synchronize do
-          # TODO: investigate what's more performant: function linking or link module into
-          # LLVM_MOD.link_into(llvm_mod)
-          # rb_func.dump
+        if Gem.win_platform?
+          # Add uwtable(async) to JIT-generated functions so LLVM emits full Windows SEH
+          # .pdata/.xdata entries.  clang-cl adds this automatically; IR built here does not
+          # inherit it.  Value 1 = async (covers longjmp/RtlUnwindEx); value 0 = sync only.
+          _uwtable_name = 'uwtable'
+          _uwtable_ptr = FFI::MemoryPointer.from_string(_uwtable_name)
+          _uwtable_kind = LLVM::C.get_enum_attribute_kind_for_name(_uwtable_ptr, _uwtable_name.length)
+          _uwtable_attr = LLVM::C.create_enum_attribute(LLVM::Context.global, _uwtable_kind, 2)
+          LLVM::C.add_attribute_at_index(rb_func, -1, _uwtable_attr)
+          LLVM::C.add_attribute_at_index(call_blocking_func, -1, _uwtable_attr) if blocking
+        end
 
-          # Ruby llvm_mod object isn't kept around and might be GCed, but
-          # it doesn't call +dispose+ automatically, so it's ok.
-          # Note that in function name +llvm_mod.hash+ is used and it
-          # mustn't be reused until the module is disposed, unlike
-          # Ruby's object_id, which may be reused and cause name clashes in some rare cases.
-          LLVM_ENG.modules.add(llvm_mod)
+        # Capture names as Ruby strings before add_module/function_address consume the
+        # LLVM IR (after JIT compilation the underlying C++ Module may be freed and
+        # LLVMGetValueName would return "" on the dangling pointer).
+        _rb_func_name   = rb_func.name
+        _body_func_name = blocking ? call_blocking_func.name : nil
+
+        rb_func_addr = LLVM_MUTEX.synchronize do
+          $stderr.puts "JIT: compile #{_rb_func_name} blocking=#{blocking}"; $stderr.flush
           call_blocking_func&.verify!
           rb_func.verify!
           llvm_mod.verify!
-          # rb_func.name isn't always the same as rb_name, in case of name clashes
-          # it contains a postfix like "rb_llvm_jit_wrap_strlen.1"
-          # https://llvm.org/doxygen/group__LLVMCExecutionEngine.html
-          LLVM_ENG.function_address(rb_func.name)
+          $stderr.puts "JIT: verify ok"; $stderr.flush
+          $stderr.puts llvm_mod.to_s if Gem.win_platform? && blocking
+          if Gem.win_platform?
+            LLVM_ENG.add_module(llvm_mod)
+            $stderr.puts "JIT: add_module ok"; $stderr.flush
+          else
+            LLVM_ENG.modules.add(llvm_mod)
+          end
+          $stderr.puts "JIT: function_address(#{_rb_func_name})"; $stderr.flush
+          addr = LLVM_ENG.function_address(_rb_func_name)
+          $stderr.puts "JIT: function_address=0x#{addr.to_s(16)}"; $stderr.flush
+          if Gem.win_platform?
+            # Register .pdata for this JIT function so RtlUnwindEx can unwind through
+            # it.  JITLink does not register .pdata itself (LLVM issue #163503); without
+            # it any rb_raise() or longjmp() with a JIT frame on the stack causes
+            # STATUS_BAD_FUNCTION_TABLE — including type-conversion exceptions in
+            # non-blocking calls (e.g. passing a Symbol where a String is expected).
+            FFI::LLVMJIT.jit_register_pdata(addr)
+            $stderr.flush
+            # Verify registration via RtlLookupFunctionEntry
+            ib = FFI::MemoryPointer.new(:uint64)
+            rf = NtDll.lookup_function_entry(addr, ib, nil)
+            if rf.null?
+              $stderr.puts "JIT: .pdata still NONE after registration (unexpected!)"
+            else
+              image_base   = ib.read_uint64
+              begin_rva    = rf.get_uint32(0)
+              end_rva      = rf.get_uint32(4)
+              unwind_rva   = rf.get_uint32(8)
+              begin_actual = image_base + begin_rva
+              end_actual   = image_base + end_rva
+              xdata_actual = image_base + unwind_rva
+              ok = addr >= begin_actual && addr < end_actual
+              $stderr.puts "JIT: .pdata OK base=0x#{image_base.to_s(16)} " \
+                           "begin_rva=0x#{begin_rva.to_s(16)} end_rva=0x#{end_rva.to_s(16)} " \
+                           "unwind_rva=0x#{unwind_rva.to_s(16)} addr_in_range=#{ok}"
+            end
+            # Also register .pdata for the inner blocking body.  It is on the call
+            # stack inside rb_thread_call_without_gvl; if an APC/UBF fires while
+            # it runs and longjmp unwinds through it, the frame must have .pdata.
+            if blocking
+              body_addr = LLVM_ENG.function_address(_body_func_name)
+              $stderr.puts "JIT: body_function_address=0x#{body_addr.to_s(16)}"; $stderr.flush
+              FFI::LLVMJIT.jit_register_pdata(body_addr)
+              ib2 = FFI::MemoryPointer.new(:uint64)
+              rf2 = NtDll.lookup_function_entry(body_addr, ib2, nil)
+              $stderr.puts rf2.null? ? "JIT: body .pdata NONE (unexpected!)" :
+                "JIT: body .pdata OK addr=0x#{body_addr.to_s(16)}"
+              $stderr.flush
+            end
+            # One-time: register .pdata for every defined function in the base bitcode
+            # module.  Helper functions (ffi_llvm_jit_value_to_*, _raise_exception, etc.)
+            # are JIT-compiled as a side effect of the first function_address() call.
+            # They appear on the call stack between the outer JIT wrapper and rb_raise,
+            # so they also need .pdata.  Addresses outside the JIT callback range are
+            # silently skipped by jit_register_pdata (native DLL helpers are already OK).
+            unless JIT_HELPER_PDATA_DONE[0]
+              JIT_HELPER_PDATA_DONE[0] = true
+              LLVM_MOD.functions.each do |f|
+                next if f.declaration?.nonzero? || f.name.start_with?('llvm.')
+                begin
+                  helper_addr = LLVM_ENG.function_address(f.name)
+                  next if helper_addr == 0
+                  FFI::LLVMJIT.jit_register_pdata(helper_addr)
+                  $stderr.puts "JIT: helper .pdata #{f.name}=0x#{helper_addr.to_s(16)}"
+                rescue => e
+                  $stderr.puts "JIT: helper .pdata skip #{f.name}: #{e.message}"
+                end
+                $stderr.flush
+              end
+            end
+          end
+          addr
         end
-        # I'm not sure whether func addr can be the same in ORC JIT, but I'm pretty sure module address is unique
-        [rb_func_addr, llvm_mod.to_ptr.address]
+        [rb_func_addr, LLVM_FUNC_SEQ[0]]
       end
 
       # rubocop:disable Metrics/ParameterLists
       def emit_blocking_call(
-        builder, llvm_mod, params_store_t, exc_store, frame, converted_params, call_blocking_func,
+        builder, llvm_mod, params_store_t, frame, converted_params, call_blocking_func,
         params_store, call_data
       )
         converted_params.each_with_index do |p, i|
@@ -615,15 +734,20 @@ module FFI
           builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''),
         )
         if Gem.win_platform?
-          builder.store(VALUE.from_i(0), exc_store)
+          # rb_rescue2 is called from C (ffi_llvm_jit_blocking_call_win) rather than
+          # JIT code: on MSVC x64, longjmp inside rb_rescue2 calls RtlUnwindEx which
+          # requires .pdata unwind tables for every frame; JIT frames may not have them.
+          # ffi_llvm_jit_blocking_call_win is native (ffi_llvm_jit.c), not in LLVM_MOD,
+          # so we can't use link_external_function — borrow the type from
+          # ffi_llvm_jit_blocking_call which has the same VALUE(VALUE) signature.
+          unless llvm_mod.functions['ffi_llvm_jit_blocking_call_win']
+            f = llvm_mod.functions.add('ffi_llvm_jit_blocking_call_win',
+                                       LLVM_MOD.functions['ffi_llvm_jit_blocking_call'].function_type)
+            f.linkage = :external
+          end
           builder.call(
-            link_external_function(llvm_mod, 'rb_rescue2'),
-            link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
+            llvm_mod.functions['ffi_llvm_jit_blocking_call_win'],
             builder.ptr2int(call_data, VALUE),
-            link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
-            builder.ptr2int(exc_store, VALUE),
-            builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
-            VALUE.from_i(0),
           )
         else
           builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame)

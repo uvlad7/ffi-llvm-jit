@@ -41,3 +41,7 @@ group :development do
   gem 'rubocop', '~> 1.21'
   gem 'yard', '~> 0.9.37'
 end
+
+gem "fiddle", ">= 1.1"
+
+gem "irb", ">= 1.18"

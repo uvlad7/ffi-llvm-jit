@@ -40,6 +40,7 @@ typedef struct ffi_llvm_jit_frame {
     struct ffi_llvm_jit_frame* prev;
     VALUE exc;
 } ffi_llvm_jit_frame_t;
+__attribute__((used)) static ffi_llvm_jit_frame_t ffi_llvm_jit_frame_keepalive = {};
 
 /* Resolved at JIT load time via LLVM::C.add_symbol (same as ffi_llvm_jit_save_errno):
  *   ffi_llvm_jit_frame_push          → rbffi_frame_push

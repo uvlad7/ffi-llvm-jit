@@ -187,7 +187,13 @@ typedef struct
 {
     void* (*call_blocking_function_fn)(void *);
     void *params_store;
+#ifdef FFI_LLVM_JIT_WIN_PLATFORM
+    /* Stores the rescued exception; written by ffi_llvm_jit_blocking_call_win,
+     * read by the JIT wrapper after the call returns. */
+    VALUE exc_store;
+#endif
 } ffi_llvm_jit_blocking_call_t;
+__attribute__((used)) static ffi_llvm_jit_blocking_call_t ffi_llvm_jit_blocking_call_keepalive = {};
 
 // Future: Windows-specific UBF for interruptible blocking calls.
 //
@@ -230,6 +236,14 @@ typedef struct
 //     return Qnil;
 // }
 // #else
+
+#ifdef FFI_LLVM_JIT_WIN_PLATFORM
+/* Declaration only — defined natively in ffi_llvm_jit.c so that rb_rescue2 and
+ * the inner blocking call are entirely within C frames (no JIT frames in the
+ * RtlUnwindEx unwind path).  The declaration here lets link_external_function
+ * find the type in LLVM_MOD. */
+VALUE ffi_llvm_jit_blocking_call_win(VALUE data);
+#endif
 
 VALUE
 ffi_llvm_jit_blocking_call(VALUE data)
