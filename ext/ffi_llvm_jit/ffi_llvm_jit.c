@@ -217,11 +217,6 @@ get_or_install_region(DWORD64 func_addr)
         fflush(stderr);
         return NULL;
     }
-    fprintf(stderr,
-            "ffi_llvm_jit: pdata callback installed region=%ld base=0x%llx xdata=0x%llx\n",
-            (long)count, (unsigned long long)base,
-            (unsigned long long)(ULONG_PTR)nr->xdata);
-    fflush(stderr);
     MemoryBarrier();
     InterlockedIncrement(&g_region_count);
     return nr;
@@ -334,14 +329,6 @@ jit_register_pdata(DWORD64 func_addr)
         return;
     }
 
-    /* Diagnostic: dump prolog bytes and synthesized UNWIND_INFO to confirm correctness. */
-    fprintf(stderr, "ffi_llvm_jit: code[0..15]:");
-    for (int b = 0; b < 16; b++) fprintf(stderr, " %02x", c[b]);
-    fprintf(stderr, "\nffi_llvm_jit: xdata[0..%zu]:", xdata_sz - 1);
-    for (SIZE_T b = 0; b < xdata_sz; b++) fprintf(stderr, " %02x", xdata[b]);
-    fprintf(stderr, "\n");
-    fflush(stderr);
-
     LONG idx = g_jit_func_count; /* only this (Ruby main) thread writes; increment last */
     g_jit_funcs[idx].begin           = func_addr;
     g_jit_funcs[idx].end             = func_addr + JIT_FUNC_EST_SZ;
@@ -352,11 +339,6 @@ jit_register_pdata(DWORD64 func_addr)
     /* Publish the entry after all fields are written. */
     MemoryBarrier();
     InterlockedIncrement(&g_jit_func_count);
-
-    fprintf(stderr,
-            "ffi_llvm_jit: pdata registered func=0x%llx prolog_sz=%d nuw=%d\n",
-            (unsigned long long)func_addr, prolog_sz, nuw);
-    fflush(stderr);
 }
 
 static VALUE

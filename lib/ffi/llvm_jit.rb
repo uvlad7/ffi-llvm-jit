@@ -64,6 +64,7 @@ module FFI
         $stderr.puts "RbConfig::CONFIG host_os=#{RbConfig::CONFIG['host_os']} target_os=#{RbConfig::CONFIG['target_os']}"
         $stderr.puts "RbConfig::MAKEFILE_CONFIG host_cpu=#{RbConfig::MAKEFILE_CONFIG['host_cpu']} target_cpu=#{RbConfig::MAKEFILE_CONFIG['target_cpu']}"
         $stderr.puts "RbConfig::MAKEFILE_CONFIG host_os=#{RbConfig::MAKEFILE_CONFIG['host_os']} target_os=#{RbConfig::MAKEFILE_CONFIG['target_os']}"
+        $stderr.puts "Gem.win_platform?=#{Gem.win_platform?} mswin_match=#{!!(RbConfig::CONFIG['host_os'] =~ /mswin/i)}"
         $stderr.puts "LLVM default triple: #{LLVM::C.get_default_target_triple}"
         $stderr.puts "LLVM_MOD triple: #{LLVM_MOD.triple}"
         $stderr.puts "LLVM_TRIPLE parsed: #{LLVM_TRIPLE.inspect}"
@@ -105,14 +106,6 @@ module FFI
       end
 
       if Gem.win_platform?
-        # Diagnostic: inspect what RtlAddFunctionTable base JITLink uses for .pdata.
-        module NtDll
-          extend FFI::Library
-          ffi_lib 'ntdll'
-          # PRUNTIME_FUNCTION RtlLookupFunctionEntry(DWORD64 ControlPc, PDWORD64 ImageBase, PVOID HistoryTable)
-          attach_function :lookup_function_entry, :RtlLookupFunctionEntry, [:uint64, :pointer, :pointer], :pointer
-        end
-
         LLVM_ENG = LLVM::LLJit.new
 
         ffi_ext = File.expand_path("llvm_jit/ffi_llvm_jit.#{RbConfig::MAKEFILE_CONFIG['DLEXT']}", __dir__)
@@ -211,8 +204,6 @@ module FFI
         # ffi_llvm_jit_frame_t: { td: ptr, prev: ptr, exc: VALUE }
         # Windows omits td but frame push/pop/save_frame_exception are unused there.
         frame_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_frame')
-        require 'pry'
-        binding.pry
         frame_t = LLVM::Type.from_ptr(frame_t_ptr) unless frame_t_ptr.null?
         $stderr.puts "ffi_llvm_jit: FRAME_T from bitcode=#{!frame_t.nil?}"
         FRAME_T = frame_t || LLVM::Struct(VOID_PTR_T, VOID_PTR_T, VALUE)
@@ -503,7 +494,6 @@ module FFI
       # rubocop:enable Metrics/ParameterLists
 
       def llvm_jit_function_addr(rb_name, c_address, arg_type_names, ret_type_name, call_conv, blocking:)
-        $stderr.puts "JIT: build #{rb_name}(#{arg_type_names.join(',')}) -> #{ret_type_name} blocking=#{blocking}"; $stderr.flush
         # AFAIK name doesn't need to be unique
         llvm_mod = LLVM::Module.new('llvm_jit')
         # Match triple and data layout to the bitcode module so JITLink selects the correct
@@ -639,21 +629,15 @@ module FFI
         _body_func_name = blocking ? call_blocking_func.name : nil
 
         rb_func_addr = LLVM_MUTEX.synchronize do
-          $stderr.puts "JIT: compile #{_rb_func_name} blocking=#{blocking}"; $stderr.flush
           call_blocking_func&.verify!
           rb_func.verify!
           llvm_mod.verify!
-          $stderr.puts "JIT: verify ok"; $stderr.flush
-          $stderr.puts llvm_mod.to_s if Gem.win_platform? && blocking
           if Gem.win_platform?
             LLVM_ENG.add_module(llvm_mod)
-            $stderr.puts "JIT: add_module ok"; $stderr.flush
           else
             LLVM_ENG.modules.add(llvm_mod)
           end
-          $stderr.puts "JIT: function_address(#{_rb_func_name})"; $stderr.flush
           addr = LLVM_ENG.function_address(_rb_func_name)
-          $stderr.puts "JIT: function_address=0x#{addr.to_s(16)}"; $stderr.flush
           if Gem.win_platform?
             # Register .pdata for this JIT function so RtlUnwindEx can unwind through
             # it.  JITLink does not register .pdata itself (LLVM issue #163503); without
@@ -661,44 +645,18 @@ module FFI
             # STATUS_BAD_FUNCTION_TABLE — including type-conversion exceptions in
             # non-blocking calls (e.g. passing a Symbol where a String is expected).
             FFI::LLVMJIT.jit_register_pdata(addr)
-            $stderr.flush
-            # Verify registration via RtlLookupFunctionEntry
-            ib = FFI::MemoryPointer.new(:uint64)
-            rf = NtDll.lookup_function_entry(addr, ib, nil)
-            if rf.null?
-              $stderr.puts "JIT: .pdata still NONE after registration (unexpected!)"
-            else
-              image_base   = ib.read_uint64
-              begin_rva    = rf.get_uint32(0)
-              end_rva      = rf.get_uint32(4)
-              unwind_rva   = rf.get_uint32(8)
-              begin_actual = image_base + begin_rva
-              end_actual   = image_base + end_rva
-              xdata_actual = image_base + unwind_rva
-              ok = addr >= begin_actual && addr < end_actual
-              $stderr.puts "JIT: .pdata OK base=0x#{image_base.to_s(16)} " \
-                           "begin_rva=0x#{begin_rva.to_s(16)} end_rva=0x#{end_rva.to_s(16)} " \
-                           "unwind_rva=0x#{unwind_rva.to_s(16)} addr_in_range=#{ok}"
-            end
             # Also register .pdata for the inner blocking body.  It is on the call
             # stack inside rb_thread_call_without_gvl; if an APC/UBF fires while
             # it runs and longjmp unwinds through it, the frame must have .pdata.
             if blocking
               body_addr = LLVM_ENG.function_address(_body_func_name)
-              $stderr.puts "JIT: body_function_address=0x#{body_addr.to_s(16)}"; $stderr.flush
               FFI::LLVMJIT.jit_register_pdata(body_addr)
-              ib2 = FFI::MemoryPointer.new(:uint64)
-              rf2 = NtDll.lookup_function_entry(body_addr, ib2, nil)
-              $stderr.puts rf2.null? ? "JIT: body .pdata NONE (unexpected!)" :
-                "JIT: body .pdata OK addr=0x#{body_addr.to_s(16)}"
-              $stderr.flush
             end
             # One-time: register .pdata for every defined function in the base bitcode
             # module.  Helper functions (ffi_llvm_jit_value_to_*, _raise_exception, etc.)
             # are JIT-compiled as a side effect of the first function_address() call.
             # They appear on the call stack between the outer JIT wrapper and rb_raise,
-            # so they also need .pdata.  Addresses outside the JIT callback range are
-            # silently skipped by jit_register_pdata (native DLL helpers are already OK).
+            # so they also need .pdata.
             unless JIT_HELPER_PDATA_DONE[0]
               JIT_HELPER_PDATA_DONE[0] = true
               LLVM_MOD.functions.each do |f|
@@ -707,11 +665,9 @@ module FFI
                   helper_addr = LLVM_ENG.function_address(f.name)
                   next if helper_addr == 0
                   FFI::LLVMJIT.jit_register_pdata(helper_addr)
-                  $stderr.puts "JIT: helper .pdata #{f.name}=0x#{helper_addr.to_s(16)}"
-                rescue => e
-                  $stderr.puts "JIT: helper .pdata skip #{f.name}: #{e.message}"
+                rescue StandardError
+                  nil
                 end
-                $stderr.flush
               end
             end
           end
