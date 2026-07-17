@@ -41,16 +41,17 @@ module LLVM
       raise_if_error(err)
       @ptr = out.read_pointer
 
-      # Print the raw JITLink error before ORC wraps it in "Failed to materialize symbols".
-      # The error reporter fires on background/async errors; synchronous lookup errors
-      # go through raise_if_error, but the underlying cause is reported here first.
-      @_error_reporter_cb = FFI::Function.new(:void, [:pointer, :pointer]) do |_ctx, err_ref|
-        msg = C.get_error_message(err_ref)
-        $stderr.puts "JITLink error: #{msg}"
-        C.dispose_error_message(msg)
-      end
+      # Install the native C error reporter. Pass LLVM function pointers from the
+      # already-loaded DLL so the C extension needs no build-time LLVM dependency.
       es = C.get_execution_session(@ptr)
-      C.set_error_reporter(es, @_error_reporter_cb, nil)
+      fns = C.attached_functions
+      FFI::Function.new(:void, [:pointer, :pointer, :pointer, :pointer],
+                        FFI::LLVMJIT.jit_init_error_reporter_ptr).call(
+        es,
+        fns[:set_error_reporter],
+        fns[:get_error_message],
+        fns[:dispose_error_message],
+      )
 
       dylib = C.get_main_jit_dylib(@ptr)
       gen_out = FFI::MemoryPointer.new(:pointer)

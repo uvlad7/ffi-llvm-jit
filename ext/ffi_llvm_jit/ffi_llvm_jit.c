@@ -1,4 +1,69 @@
 #include "ffi_llvm_jit.h"
+#include <stdio.h>
+#include <stdint.h>
+
+/* -----------------------------------------------------------------------
+ * Native async error reporter for the ORC ExecutionSession.
+ *
+ * LLVM is not linked at build time; Ruby passes the required function
+ * pointers into jit_init_error_reporter (resolved via ffi_libraries at
+ * the Ruby level after the LLVM DLL is already loaded).
+ * LLVMErrorRef is an opaque struct pointer — void * is ABI-compatible.
+ * ----------------------------------------------------------------------- */
+
+typedef char *(*t_get_err_msg)(void *);
+typedef void  (*t_disp_err_msg)(char *);
+
+static t_get_err_msg  fn_get_err_msg  = NULL;
+static t_disp_err_msg fn_disp_err_msg = NULL;
+
+static void
+jit_async_error_reporter(void *ctx, void *err)
+{
+    (void)ctx;
+    if (!fn_get_err_msg) {
+        fprintf(stderr, "JITLink error: (reporter not initialized)\n");
+        fflush(stderr);
+        return;
+    }
+    char *msg = fn_get_err_msg(err);
+    if (!msg) return;
+    fprintf(stderr, "JITLink error: %s\n", msg);
+    fflush(stderr);
+    fn_disp_err_msg(msg);
+}
+
+/* Called once from Ruby after LLVM is loaded. Stores the LLVM function
+ * pointers and installs jit_async_error_reporter on the execution session. */
+static void
+jit_init_error_reporter(
+    void *es,
+    void (*set_reporter)(void *, void (*)(void *, void *), void *),
+    t_get_err_msg  get_msg,
+    t_disp_err_msg disp_msg
+)
+{
+    if (!es)           rb_raise(rb_eArgError, "jit_init_error_reporter: es is NULL");
+    if (!set_reporter) rb_raise(rb_eArgError, "jit_init_error_reporter: set_reporter is NULL");
+    if (!get_msg)      rb_raise(rb_eArgError, "jit_init_error_reporter: get_msg is NULL");
+    if (!disp_msg)     rb_raise(rb_eArgError, "jit_init_error_reporter: disp_msg is NULL");
+    fn_get_err_msg  = get_msg;
+    fn_disp_err_msg = disp_msg;
+    set_reporter(es, jit_async_error_reporter, NULL);
+}
+
+/* Returns the address of jit_init_error_reporter as an FFI::Pointer so Ruby
+ * can wrap it in FFI::Function and call it with the resolved LLVM pointers. */
+static VALUE
+rb_jit_init_error_reporter_ptr(VALUE self)
+{
+    (void)self;
+    VALUE ffi_mod = rb_const_get(rb_cObject, rb_intern("FFI"));
+    VALUE ptr_cls = rb_const_get(ffi_mod, rb_intern("Pointer"));
+    return rb_funcall(ptr_cls, rb_intern("new"), 1,
+                      ULL2NUM((unsigned long long)(uintptr_t)jit_init_error_reporter));
+}
+
 
 #ifdef _MSC_VER
 /* Re-export __security_check_cookie from bufferoverflowU.lib so LLVM's JIT can
@@ -408,6 +473,8 @@ Init_ffi_llvm_jit(void)
 #endif
   );
   rb_define_private_method(rb_mFFILLVMJITLibrary, "attach_rb_wrap_function", attach_rb_wrap_function, 4);
+  rb_define_module_function(rb_mFFILLVMJIT, "jit_init_error_reporter_ptr",
+                            rb_jit_init_error_reporter_ptr, 0);
 #ifdef _WIN32
   rb_define_module_function(rb_mFFILLVMJIT, "jit_register_pdata", rb_jit_register_pdata, 1);
 #endif
