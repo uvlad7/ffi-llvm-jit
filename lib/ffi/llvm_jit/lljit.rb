@@ -124,7 +124,7 @@ module LLVM
       ffi_lib_flags(:lazy, :global)
       _ver = LLVM::LLVM_VERSION
       ffi_lib ["LLVM-#{_ver}", "libLLVM-#{_ver}.so.1", "libLLVM.so.#{_ver}",
-               "libLLVM.so.#{_ver}.1", "libLLVM-#{_ver}.dll"]
+               "libLLVM.so.#{_ver}.1", "libLLVM-#{_ver}.dll", "LLVM-C"]
 
       attach_function :create_lljit_builder, :LLVMOrcCreateLLJITBuilder, [], :pointer
       # JIT Target Machine Builder — used to override the default host triple on mswin.
