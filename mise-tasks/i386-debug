@@ -24,7 +24,7 @@ if ! docker image inspect "$IMAGE" &>/dev/null; then
       set -e
       apt-get update -qq
       apt-get install -y --no-install-recommends \
-        ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg nano
+        ruby ruby-dev ruby-bundler build-essential wget ca-certificates lsb-release gnupg nano libyaml-dev
       gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 15CF4D18AF4F7421
       gpg --export 15CF4D18AF4F7421 > /etc/apt/trusted.gpg.d/llvm.gpg
       echo "deb [signed-by=/etc/apt/trusted.gpg.d/llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-18 main" > /etc/apt/sources.list.d/llvm.list

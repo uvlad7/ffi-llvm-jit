@@ -2,8 +2,9 @@
 #MISE description="Spin up Windows Server 2022 VM (dockur/windows) for debugging ruby-llvm Windows install"
 #USAGE flag "--rebuild" help="Destroy persistent storage and start fresh"
 #USAGE flag "--iso <path>" help="Use a local Windows ISO instead of downloading; only valid combined with --rebuild (cached and auto-reused on later runs)"
-#USAGE flag "--backup" help="Back up the VM disk volume to a uniquely-named snapshot (debug-win-storage/backups/) and exit"
+#USAGE flag "--backup" help="Back up the VM disk volume to a uniquely-named snapshot (win-debug-storage/backups/) and exit"
 #USAGE flag "--restore <name>" help="Restore the VM disk volume from a snapshot created by --backup, then exit"
+#USAGE flag "--attach" help="Skip starting a new VM; SSH into the already-running one"
 #USAGE flag "--shell <shell>" {
 #USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, bash (MSYS2 MINGW64, 64-bit Ruby), bash32 (MSYS2 MINGW32, 32-bit Ruby — stdcall calling convention), cygwin (Cygwin bash — C errno and GetLastError() are separate channels), mswin (MSVC Ruby + MSVC-built LLVM — PowerShell with VS developer environment; for cmd instead: mswin-cmd), mswin-msys (MSVC Ruby + MSYS2 UCRT64 LLVM — useful for comparing DLL behaviour)"
 #USAGE   default "powershell"
@@ -13,7 +14,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 VOLUME="ffi-llvm-jit-win-storage"
-STORAGE_DIR="${PROJECT_ROOT}/mise-tasks/debug-win-storage"
+STORAGE_DIR="${PROJECT_ROOT}/mise-tasks/win-debug-storage"
 OEM_DIR="${STORAGE_DIR}/win-oem"
 SSH_KEY="${STORAGE_DIR}/win_ssh_key"
 SENTINEL="${STORAGE_DIR}/win-setup-done"
@@ -79,8 +80,13 @@ if [[ -n "${usage_restore:-}" ]]; then
   [[ -f "${src}/last-iso-path" ]] && cp -p "${src}/last-iso-path" "$ISO_CACHE"
   [[ -f "${src}/win-setup-done" ]] && cp -p "${src}/win-setup-done" "$SENTINEL"
   [[ -f "${src}/win-install.log" ]] && cp -p "${src}/win-install.log" "$INSTALL_LOG"
-  echo "==> Restore complete. Run debug-win again (without --restore) to boot it."
+  echo "==> Restore complete. Run win-debug again (without --restore) to boot it."
   exit 0
+fi
+
+if [[ -n "${usage_attach:-}" && -n "${usage_rebuild:-}" ]]; then
+  echo "ERROR: --attach and --rebuild cannot be used together" >&2
+  exit 1
 fi
 
 if [[ -n "${usage_rebuild:-}" ]]; then
@@ -95,9 +101,16 @@ if [[ -n "${usage_rebuild:-}" ]]; then
   rm -f "$SENTINEL" "$INSTALL_LOG" "$ISO_CACHE"
 fi
 
+if [[ -n "${usage_attach:-}" && ! -f "$SSH_KEY" ]]; then
+  echo "ERROR: SSH key not found: $SSH_KEY" >&2
+  exit 1
+fi
+
+if [[ -z "${usage_attach:-}" ]]; then
+
 mkdir -p "$OEM_DIR"
 
-# Generate SSH keypair once; persists in debug-win-storage/ (gitignored)
+# Generate SSH keypair once; persists in win-debug-storage/ (gitignored)
 if [[ ! -f "$SSH_KEY" ]]; then
   echo "==> Generating SSH keypair..."
   ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -C "ffi-llvm-jit-win-debug"
@@ -111,7 +124,7 @@ cat > "$OEM_DIR/install.bat" << 'ENDBAT'
 setlocal
 chcp 65001 >nul
 
-set LOG=Z:\mise-tasks\debug-win-storage\win-install.log
+set LOG=Z:\mise-tasks\win-debug-storage\win-install.log
 
 :wait_share
 net use Z: \\host.lan\Data /persistent:yes >nul 2>&1
@@ -233,7 +246,7 @@ reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce" /v EnableConsol
 
 echo ==^> install.bat finished. >> %LOG%
 
-echo done > Z:\mise-tasks\debug-win-storage\win-setup-done
+echo done > Z:\mise-tasks\win-debug-storage\win-setup-done
 ENDBAT
 
 # `pacman -Sy` (sync only) vs `-Syu` (sync+upgrade) — `-Sy` alone caused a real dependency conflict (`mingw-w64-ucrt-x86_64-gcc-libs` version pin) when installing `mingw-w64-ucrt-x86_64-llvm`; fixed with `-Syu`
@@ -404,14 +417,18 @@ if [[ ! -f "$SENTINEL" ]]; then
   echo "==> Setup complete."
 fi
 
+fi # [[ -z "${usage_attach:-}" ]]
+
 echo "==> Waiting for SSH to become available..."
 until ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 -p 2222 Docker@localhost "exit 0" 2>/dev/null; do
   sleep 5
   echo "    still waiting..."
 done
 
-kill "$LOGS_PID" 2>/dev/null || true
-wait "$LOGS_PID" 2>/dev/null || true
+if [[ -z "${usage_attach:-}" ]]; then
+  kill "$LOGS_PID" 2>/dev/null || true
+  wait "$LOGS_PID" 2>/dev/null || true
+fi
 echo "==> Connecting (project available at Z:\\)..."
 # net use's /persistent:yes only auto-restores for the account/session that created it
 # (install.bat runs as a different logon than the SSH session), so each new SSH session
@@ -423,35 +440,35 @@ SSH="ssh -t -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnow
 # calls a bat file in STORAGE_DIR (served as Z:) so the SSH string has zero inner quotes.
 case "$usage_shell" in
   cmd)
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-cmd.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-cmd.bat"
     ;;
   bash)
     # MINGW64 environment; /c/Ruby34-x64/bin is the MSYS2 path for C:\Ruby34-x64\bin.
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-bash.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-bash.bat"
     ;;
   bash32)
     # MINGW32 environment for 32-bit Ruby; Gemfile-win32 pins ruby-llvm ~> 21 (MSYS2 i686 max).
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-bash32.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-bash32.bat"
     ;;
   cygwin)
     # Cygwin: /cygdrive/z for Z:; td_errno = C errno, td_winapi_errno = GetLastError() (distinct channels).
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-cygwin.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-cygwin.bat"
     ;;
   mswin)
     # VS dev env + mswin Ruby + MSVC-built LLVM (C:\llvm-msvc). PowerShell interactive.
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\vsshell.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\vsshell.bat"
     ;;
   mswin-cmd)
     # Same as mswin but drops into cmd.exe instead of PowerShell.
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\vsshell-cmd.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\vsshell-cmd.bat"
     ;;
   mswin-msys)
     # VS dev env + mswin Ruby + MSYS2 UCRT64 LLVM. Useful for comparing MinGW vs MSVC LLVM behaviour.
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\vsshell-msys.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\vsshell-msys.bat"
     ;;
   *)
     # Default PowerShell: ridk.ps1 runs in-process (unlike ridk.cmd) so $env: changes survive into -NoExit.
-    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\debug-win-storage\\shell-powershell.bat"
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-powershell.bat"
     ;;
 esac
 

@@ -6,7 +6,7 @@
 /pkg/
 /spec/reports/
 /tmp/
-/mise-tasks/debug-win-storage/
+/mise-tasks/win-debug-storage/
 *.bundle
 *.so
 *.dll
