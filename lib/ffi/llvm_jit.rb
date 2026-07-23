@@ -10,7 +10,7 @@ require 'llvm/execution_engine'
 
 require_relative 'llvm_jit/version'
 require_relative 'llvm_jit/ffi_llvm_jit'
-require_relative 'llvm_jit/lljit' if Gem.win_platform?
+require_relative 'llvm_jit/lljit'
 
 module FFI
   # https://llvm.org/doxygen/group__LLVMCCoreModule.html
@@ -179,35 +179,22 @@ module FFI
       VALUE = INTPTR
       VOID_PTR_T = LLVM.Pointer(LLVM::Void()) # Opaque pointer I guess
 
-      # Modern LLVM doesn't persist the type
-      # from_type raises in v21 on null ptr so we need to check explicitly
-      blocking_call_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_blocking_call_t')
-      blocking_call_t = LLVM::Type.from_ptr(blocking_call_t_ptr) unless blocking_call_t_ptr.null?
-      # TODO: with all keepalives type are kept - avoid fallbacks but raise if type isn't fould (LLVM::Type.from_ptr(NULL) is safe, just check later)
-      BLOCKING_CALL_T = blocking_call_t || if Gem.win_platform?
-        # 3 fields: call_blocking_function_fn, params_store, exc_store (VALUE).
-        # Defined here rather than taken from the bitcode because FFI_LLVM_JIT_WIN_PLATFORM
-        # may not be set during clang-cl bitcode compilation, leaving only 2 fields there.
-        LLVM::Struct(
-          LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
-          VOID_PTR_T,
-          VALUE,
-        )
-      else
-        LLVM::Struct(
-          LLVM::Pointer(LLVM::Function([VOID_PTR_T], VOID_PTR_T)),
-          VOID_PTR_T,
-        )
-      end
+      BLOCKING_CALL_T = LLVM_MOD.types['struct.ffi_llvm_jit_blocking_call_t']
+      raise 'BLOCKING_CALL_T not found' unless BLOCKING_CALL_T
 
-      unless Gem.win_platform?
+      layout = LLVM::TargetDataLayout.new(LLVM_MOD.data_layout)
+      if Gem.win_platform?
+        off = LLVM::Value.from_ptr_kind(LLVM_MOD.globals['ffi_llvm_jit_blocking_call_exc_off'].initializer.to_ptr).to_i(false)
+        BLOCKING_CALL_EXC_INDEX = layout.element_at_offset(BLOCKING_CALL_T, off)
+        private_constant :BLOCKING_CALL_EXC_INDEX
+      else
         # ffi_llvm_jit_frame_t: { td: ptr, prev: ptr, exc: VALUE }
         # Windows omits td but frame push/pop/save_frame_exception are unused there.
-        frame_t_ptr = LLVM::C.get_type_by_name(LLVM_MOD, 'struct.ffi_llvm_jit_frame')
-        frame_t = LLVM::Type.from_ptr(frame_t_ptr) unless frame_t_ptr.null?
-        $stderr.puts "ffi_llvm_jit: FRAME_T from bitcode=#{!frame_t.nil?}"
-        FRAME_T = frame_t || LLVM::Struct(VOID_PTR_T, VOID_PTR_T, VALUE)
-        FRAME_EXC_INDEX = 2
+        FRAME_T = LLVM_MOD.types['struct.ffi_llvm_jit_frame']
+        raise 'FRAME_T not found' unless FRAME_T
+
+        off = LLVM::Value.from_ptr_kind(LLVM_MOD.globals['ffi_llvm_jit_frame_exc_off'].initializer.to_ptr).to_i(false)
+        FRAME_EXC_INDEX = layout.element_at_offset(FRAME_T, off)
         private_constant :FRAME_T, :FRAME_EXC_INDEX
       end
 
@@ -374,7 +361,7 @@ module FFI
       end
 
       def attach_llvm_jit_function_handle(function_handle, mname, arg_types, ret_type, options, jit_only: false)
-        # raise UnsupportedErrror, 'FFI.errno is unsupported on Windows' if Gem.win_platform? && !@i_dont_use_errno_i_promise
+        # raise UnsupportedError, 'FFI.errno is unsupported on Windows' if Gem.win_platform? && !@i_dont_use_errno_i_promise
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
         # raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless @yolo ||
@@ -588,7 +575,7 @@ module FFI
             builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_save_errno')) unless Gem.win_platform?
             if Gem.win_platform?
               if blocking
-                exc_gep = builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(2)], '')
+                exc_gep = builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(BLOCKING_CALL_EXC_INDEX)], '')
                 builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_raise_exception'), builder.load2(VALUE, exc_gep))
               end
             else
@@ -690,20 +677,18 @@ module FFI
           builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(1)], ''),
         )
         if Gem.win_platform?
-          # rb_rescue2 is called from C (ffi_llvm_jit_blocking_call_win) rather than
-          # JIT code: on MSVC x64, longjmp inside rb_rescue2 calls RtlUnwindEx which
-          # requires .pdata unwind tables for every frame; JIT frames may not have them.
-          # ffi_llvm_jit_blocking_call_win is native (ffi_llvm_jit.c), not in LLVM_MOD,
-          # so we can't use link_external_function — borrow the type from
-          # ffi_llvm_jit_blocking_call which has the same VALUE(VALUE) signature.
-          unless llvm_mod.functions['ffi_llvm_jit_blocking_call_win']
-            f = llvm_mod.functions.add('ffi_llvm_jit_blocking_call_win',
-                                       LLVM_MOD.functions['ffi_llvm_jit_blocking_call'].function_type)
-            f.linkage = :external
-          end
+          # Zero-init exc_store: alloca is uninitialized and ffi_llvm_jit_save_exception
+          # only writes on exception, so raise_exception would see garbage otherwise.
+          exc_store_gep = builder.gep2(BLOCKING_CALL_T, call_data, [LLVM::Int(0), LLVM::Int(BLOCKING_CALL_EXC_INDEX)], 'exc_store')
+          builder.store(VALUE.from_i(0), exc_store_gep)
           builder.call(
-            llvm_mod.functions['ffi_llvm_jit_blocking_call_win'],
+            link_external_function(llvm_mod, 'rb_rescue2'),
+            link_external_function(llvm_mod, 'ffi_llvm_jit_blocking_call'),
             builder.ptr2int(call_data, VALUE),
+            link_external_function(llvm_mod, 'ffi_llvm_jit_save_exception'),
+            builder.ptr2int(exc_store_gep, VALUE),
+            builder.load2(VALUE, link_external_global(llvm_mod, 'rb_eException')),
+            VALUE.from_i(0),
           )
         else
           builder.call(link_external_function(llvm_mod, 'ffi_llvm_jit_frame_push'), frame)

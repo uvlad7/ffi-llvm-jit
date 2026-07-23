@@ -76,7 +76,6 @@ rb_jit_init_error_reporter_ptr(VALUE self)
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include "ruby/thread.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -85,50 +84,6 @@ rb_jit_init_error_reporter_ptr(VALUE self)
  * Must be a native C function — ORC may call it from a JIT worker thread, so a Ruby
  * FFI callback would be unsafe here. */
 RUBY_FUNC_EXPORTED void __main(void) {}
-
-/* Must match ffi_llvm_jit_blocking_call_t in llvm_bitcode.c (same field order and types). */
-typedef struct {
-    void *(*call_blocking_function_fn)(void *);
-    void *params_store;
-    VALUE exc_store;
-} ffi_llvm_jit_blocking_call_win_t;
-
-static VALUE
-ffi_llvm_jit_win_blocking_inner(VALUE data)
-{
-    ffi_llvm_jit_blocking_call_win_t *call_data = (ffi_llvm_jit_blocking_call_win_t *)data;
-    rb_thread_call_without_gvl(call_data->call_blocking_function_fn, call_data->params_store,
-                                (rb_unblock_function_t *)-1, NULL);
-    return Qnil;
-}
-
-static VALUE
-ffi_llvm_jit_win_save_exc(VALUE data, VALUE exc)
-{
-    VALUE *store = (VALUE *)data;
-    *store = exc;
-    return Qnil;
-}
-
-/* Called from the JIT wrapper instead of rb_rescue2 directly.
- * On MSVC x64, longjmp calls RtlUnwindEx which requires .pdata unwind tables
- * for every frame on the stack (LLVM issue #163503 — JITLink does not register
- * them).  Keeping rb_rescue2 and the blocking call here in native C ensures the
- * rescue path only unwinds through frames that already have .pdata.
- * The JIT outer frame (rb_func) still needs .pdata for non-blocking exceptions
- * (e.g. rb_raise from type-conversion helpers): see jit_register_pdata below. */
-RUBY_FUNC_EXPORTED VALUE
-ffi_llvm_jit_blocking_call_win(VALUE data)
-{
-    ffi_llvm_jit_blocking_call_win_t *call_data = (ffi_llvm_jit_blocking_call_win_t *)data;
-    call_data->exc_store = 0;
-    rb_rescue2(
-        ffi_llvm_jit_win_blocking_inner, data,
-        ffi_llvm_jit_win_save_exc, (VALUE)&call_data->exc_store,
-        rb_eException, (VALUE)0
-    );
-    return Qnil;
-}
 
 #if defined(_WIN64) && defined(_MSC_VER)
 #pragma comment(lib, "ntdll.lib")  /* RtlInstallFunctionTableCallback */
@@ -464,7 +419,7 @@ Init_ffi_llvm_jit(void)
   rb_mFFILLVMJIT = rb_define_module_under(rb_mFFI, "LLVMJIT");
   rb_mFFILLVMJITLibrary = rb_define_module_under(rb_mFFILLVMJIT, "Library");
   rb_define_const(rb_mFFILLVMJITLibrary, "LLVM_STDCALL",
-  // That's how FFI hadles it, see https://github.com/ffi/ffi/blob/5b44581847bf167b83db51ac64aa409ccc9cabee/ext/ffi_c/FunctionInfo.c#L233
+  // That's how FFI handles it, see https://github.com/ffi/ffi/blob/5b44581847bf167b83db51ac64aa409ccc9cabee/ext/ffi_c/FunctionInfo.c#L233
   // the only supported calling convention other than default is stdcall on x86 windows
 #if defined(X86_WIN32)
   rb_intern("x86_stdcall")

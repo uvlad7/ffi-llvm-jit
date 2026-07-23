@@ -50,7 +50,7 @@ RbConfig::MAKEFILE_CONFIG['CXX'] = RbConfig::CONFIG['CXX'] = clangxx
 # required to push flags without checking
 # /clang: prefix passes a flag through to the clang driver; bare -emit-llvm is silently ignored by clang-cl
 $CFLAGS << (RbConfig::CONFIG['host_os'] =~ /mswin/i ? ' /clang:-emit-llvm' : ' -emit-llvm') # rubocop:disable Style/GlobalVars
-$CFLAGS << ' -c -Werror=implicit-function-declaration '
+$CFLAGS << ' -c -Werror=implicit-function-declaration -Wno-unknown-warning-option '
 # TODO: check which win_platform? guards are applicable on cygwin
 if Gem.win_platform? # rubocop:disable Style/GlobalVars
   $CFLAGS << ' -DFFI_LLVM_JIT_WIN_PLATFORM '

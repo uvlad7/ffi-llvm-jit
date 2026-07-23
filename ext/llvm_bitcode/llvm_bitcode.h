@@ -41,6 +41,8 @@ typedef struct ffi_llvm_jit_frame {
     VALUE exc;
 } ffi_llvm_jit_frame_t;
 __attribute__((used)) static ffi_llvm_jit_frame_t ffi_llvm_jit_frame_keepalive = {};
+__attribute__((used)) static const unsigned ffi_llvm_jit_frame_exc_off =
+    (unsigned)offsetof(ffi_llvm_jit_frame_t, exc);
 
 /* Resolved at JIT load time via LLVM::C.add_symbol (same as ffi_llvm_jit_save_errno):
  *   ffi_llvm_jit_frame_push          → rbffi_frame_push
