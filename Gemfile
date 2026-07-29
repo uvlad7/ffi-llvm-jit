@@ -8,6 +8,8 @@ llvm_version = basename[/llvm_([\d_]+)/, 1]&.gsub('_', '.')
 # win matched only after a delimiter so 'cygwin' does not accidentally match
 llvm_version ||= if basename =~ /(?:^|[-_])cygwin(?:[-_]|$)/
                    '~> 20' # Cygwin ships LLVM 20.x
+                 elsif basename =~ /(?:^|[-_])mswin32(?:[-_]|$)/
+                   '~> 21' # vovkos MSVC x86 build tops out at LLVM 21.1.x (C:\llvm-msvc32)
                  elsif basename =~ /(?:^|[-_])mswin(?:[-_]|$)/
                    '~> 22' # MSYS2 UCRT64 libLLVM-22.dll (same install as x64 Ruby, ridk-resolved path)
                  elsif basename =~ /(?:^|[-_])win32(?:[-_]|$)/
@@ -32,6 +34,7 @@ gem 'rake-compiler'
 gem 'rspec', '~> 3.0'
 
 group :development do
+  # TODO: replace with 'debug' gem
   gem 'pry', '0.14.2'
   gem 'pry-byebug', '3.10.1'
 

@@ -7,6 +7,8 @@
 /spec/reports/
 /tmp/
 /mise-tasks/win-debug-storage/
+# Empty mountpoint Docker creates for win-debug --shell bash32-ruby-llvm (nested ~/ruby-llvm bind mount)
+/ruby-llvm/
 *.bundle
 *.so
 *.dll

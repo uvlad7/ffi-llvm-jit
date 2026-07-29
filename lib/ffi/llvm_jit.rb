@@ -68,6 +68,11 @@ module FFI
         $stderr.puts "LLVM default triple: #{LLVM::C.get_default_target_triple}"
         $stderr.puts "LLVM_MOD triple: #{LLVM_MOD.triple}"
         $stderr.puts "LLVM_TRIPLE parsed: #{LLVM_TRIPLE.inspect}"
+        # "cygwin", "windows" on both msys and mswin
+        $stderr.puts "FFI::Platform::OS: #{FFI::Platform::OS}"
+        # FFI::Platform::IS_WINDOWS
+        # FFI::Platform::ARCH, FFI::Platform::CPU
+
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.

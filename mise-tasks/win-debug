@@ -6,9 +6,9 @@
 #USAGE flag "--restore <name>" help="Restore the VM disk volume from a snapshot created by --backup, then exit"
 #USAGE flag "--attach" help="Skip starting a new VM; SSH into the already-running one"
 #USAGE flag "--shell <shell>" {
-#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, bash (MSYS2 MINGW64, 64-bit Ruby), bash32 (MSYS2 MINGW32, 32-bit Ruby — stdcall calling convention), cygwin (Cygwin bash — C errno and GetLastError() are separate channels), mswin (MSVC Ruby + MSVC-built LLVM — PowerShell with VS developer environment; for cmd instead: mswin-cmd), mswin-msys (MSVC Ruby + MSYS2 UCRT64 LLVM — useful for comparing DLL behaviour)"
+#USAGE   help "Shell for the final SSH session: powershell (with ridk enable already applied), cmd, bash (MSYS2 MINGW64, 64-bit Ruby), bash32 (MSYS2 MINGW32, 32-bit Ruby — stdcall calling convention), bash32-ruby-llvm (like bash32 but mounts ~/ruby-llvm at Z:\ruby-llvm and cds there with BUNDLE_GEMFILE/BUNDLE_WITHOUT cleared and OPT=opt — for testing ruby-llvm itself on 32-bit), cygwin (Cygwin bash — C errno and GetLastError() are separate channels), mswin (MSVC Ruby + MSVC-built LLVM — PowerShell with VS developer environment; for cmd instead: mswin-cmd), mswin32 (32-bit MSVC Ruby + vovkos MSVC x86 LLVM 21 — PowerShell with VS x86 developer environment), mswin-msys (MSVC Ruby + MSYS2 UCRT64 LLVM — useful for comparing DLL behaviour)"
 #USAGE   default "powershell"
-#USAGE   choices "powershell" "cmd" "bash" "bash32" "cygwin" "mswin" "mswin-cmd" "mswin-msys"
+#USAGE   choices "powershell" "cmd" "bash" "bash32" "bash32-ruby-llvm" "cygwin" "mswin" "mswin-cmd" "mswin32" "mswin-msys"
 #USAGE }
 set -euo pipefail
 
@@ -182,8 +182,6 @@ echo ==^> Installing MINGW32 LLVM and clang for 32-bit Ruby (from MSYS2 archive 
 rem mingw-w64-i686-llvm* were dropped from the active MSYS2 i686 repo but still exist on repo.msys2.org;
 rem pacman -U accepts URLs directly; llvm-libs provides libLLVM-21.dll needed by ruby-llvm at runtime
 call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "pacman -U --needed --noconfirm --disable-download-timeout 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-llvm-libs-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-llvm-tools-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-llvm-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-clang-libs-21.1.8-4-any.pkg.tar.zst' 'https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-clang-21.1.8-4-any.pkg.tar.zst'" >> %LOG% 2>&1
-echo ==^> Creating LLVM-21.dll symlink (temporary; ruby-llvm 21 ffi_lib list lacks libLLVM-21.dll — fix upstream)... >> %LOG%
-call C:\Ruby34-x86\bin\ridk.cmd exec sh -c "ln -sf /mingw32/bin/libLLVM-21.dll /mingw32/bin/LLVM-21.dll" >> %LOG% 2>&1
 echo ==^> 32-bit ruby version: >> %LOG%
 C:\Ruby34-x86\bin\ruby.exe --version >> %LOG% 2>&1
 echo ==^> 32-bit llvm version: >> %LOG%
@@ -235,6 +233,45 @@ tar -xf "%TEMP%\llvm-msvc.tar.xz" -C C:\llvm-msvc --strip-components=1 >> %LOG% 
 echo ==^> mswin LLVM version: >> %LOG%
 C:\llvm-msvc\bin\llvm-config.exe --version >> %LOG% 2>&1
 
+echo ==^> [mswin32] Downloading 32-bit mswin Ruby 3.4.7 from jun66j5/ruby-build... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\ruby-mswin32.7z" "https://github.com/jun66j5/ruby-build/releases/download/latest/ruby-3.4.7-mswin32.7z" >> %LOG% 2>&1
+echo ==^> [mswin32] Extracting mswin32 Ruby to C:\ruby-mswin32... >> %LOG%
+C:\7zr.exe x "%TEMP%\ruby-mswin32.7z" -o"C:\" -y >> %LOG% 2>&1
+move C:\ruby-3.4.7-mswin32 C:\ruby-mswin32 >> %LOG% 2>&1
+echo ==^> [mswin32] ruby version: >> %LOG%
+C:\ruby-mswin32\bin\ruby.exe --version >> %LOG% 2>&1
+
+rem No official MSVC x86 LLVM with libs exists (llvm.org ships only x86_64/aarch64
+rem archives; the -win32.exe installers are tools-only). vovkos/llvm-package-windows
+rem is the source of a real MSVC x86 build: the llvm archive carries LLVM-C.dll + libs +
+rem headers + llvm-config/opt/llvm-dis/llvm-as; the clang archive adds clang-cl for the
+rem bitcode extconf. Both are merged into one prefix (C:\llvm-msvc32) to mirror C:\llvm-msvc.
+echo ==^> [mswin32] Downloading vovkos MSVC x86 LLVM 21.1.1 (LLVM-C.dll + libs + headers)... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\llvm-msvc32.7z" "https://github.com/vovkos/llvm-package-windows/releases/download/llvm-21.1.1/llvm-21.1.1-windows-x86-msvc17-libcmt.7z" >> %LOG% 2>&1
+echo ==^> [mswin32] Downloading vovkos MSVC x86 Clang 21.1.1 (clang-cl for bitcode)... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\clang-msvc32.7z" "https://github.com/vovkos/llvm-package-windows/releases/download/clang-21.1.1/clang-21.1.1-windows-x86-msvc17-libcmt.7z" >> %LOG% 2>&1
+echo ==^> [mswin32] Extracting and merging LLVM + Clang into C:\llvm-msvc32... >> %LOG%
+C:\7zr.exe x "%TEMP%\llvm-msvc32.7z" -o"C:\" -y >> %LOG% 2>&1
+move C:\llvm-21.1.1-windows-x86-msvc17-libcmt C:\llvm-msvc32 >> %LOG% 2>&1
+C:\7zr.exe x "%TEMP%\clang-msvc32.7z" -o"C:\" -y >> %LOG% 2>&1
+rem robocopy /E /MOVE merges the clang tree into C:\llvm-msvc32 then deletes the source;
+rem exit codes 0-7 are success, so do not check errorlevel here.
+robocopy C:\clang-21.1.1-windows-x86-msvc17-libcmt C:\llvm-msvc32 /E /MOVE >> %LOG% 2>&1
+echo ==^> [mswin32] LLVM/clang versions: >> %LOG%
+C:\llvm-msvc32\bin\llvm-config.exe --version >> %LOG% 2>&1
+C:\llvm-msvc32\bin\clang-cl.exe --version >> %LOG% 2>&1
+
+rem No x86 vcpkg prepackage exists (ruby/setup-msys2-gcc ships only x64/arm64), so build the
+rem tiny libffi + pkgconf from a pinned vcpkg source zip (git-free, CI-friendly; classic mode).
+echo ==^> [mswin32] Downloading vcpkg source zip (for 32-bit libffi + pkgconf)... >> %LOG%
+curl -L --retry 3 -o "%TEMP%\vcpkg.zip" "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.06.24.zip" >> %LOG% 2>&1
+"%SystemRoot%\System32\tar.exe" -xf "%TEMP%\vcpkg.zip" -C C:\ >> %LOG% 2>&1
+move C:\vcpkg-2026.06.24 C:\vcpkg >> %LOG% 2>&1
+echo ==^> [mswin32] Bootstrapping vcpkg... >> %LOG%
+call C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics >> %LOG% 2>&1
+echo ==^> [mswin32] Building libffi:x86-windows and pkgconf:x86-windows... >> %LOG%
+C:\vcpkg\vcpkg.exe install libffi:x86-windows pkgconf:x86-windows >> %LOG% 2>&1
+
 echo ==^> Enabling Ctrl+Shift+C/Ctrl+Shift+V console copy/paste shortcuts (current context)... >> %LOG%
 reg add "HKCU\Console" /v ForceV2 /t REG_DWORD /d 1 /f >> %LOG% 2>&1
 reg add "HKCU\Console" /v CtrlKeyShortcutsDisabled /t REG_DWORD /d 1 /f >> %LOG% 2>&1
@@ -285,6 +322,17 @@ cat > "${STORAGE_DIR}/shell-bash32.bat" << 'ENDBASH32'
 C:\Ruby34-x86\bin\ridk.cmd exec bash -c "export PATH=/c/Ruby34-x86/bin:$PATH BUNDLE_GEMFILE=/z/gemfiles/Gemfile-win32 && cd /z && exec bash"
 ENDBASH32
 
+# Same MINGW32 32-bit Ruby as bash32, but for hacking on ruby-llvm itself:
+# ~/ruby-llvm is nested-mounted under /shared so it shows up at Z:\ruby-llvm.
+# BUNDLE_GEMFILE= and BUNDLE_WITHOUT= are cleared to empty (bundler treats empty as
+# unset, so it uses ruby-llvm's own Gemfile with all groups, overriding the persistent
+# BUNDLE_WITHOUT=development set by install.bat). OPT=opt because MSYS2 ships the rolling
+# opt.exe, not the versioned opt-21.exe ruby-llvm's tests would otherwise look for.
+cat > "${STORAGE_DIR}/shell-bash32-ruby-llvm.bat" << 'ENDBASH32LLVM'
+@echo off
+C:\Ruby34-x86\bin\ridk.cmd exec bash -c "export PATH=/c/Ruby34-x86/bin:$PATH BUNDLE_GEMFILE= BUNDLE_WITHOUT= OPT=opt && cd /z/ruby-llvm && exec bash"
+ENDBASH32LLVM
+
 cat > "${STORAGE_DIR}/shell-cygwin.bat" << 'ENDCYGWIN'
 @echo off
 C:\cygwin64\bin\bash.exe --login -c "export BUNDLE_GEMFILE=/cygdrive/z/gemfiles/Gemfile-cygwin && cd /cygdrive/z && exec bash --login"
@@ -305,6 +353,21 @@ set PATH=C:\vcpkg-ruby\installed\x64-windows\tools\pkgconf;C:\vcpkg-ruby\install
 set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-mswin
 powershell.exe -NoExit -Command Set-Location Z:\
 ENDVSSHELL
+
+cat > "${STORAGE_DIR}/vsshell-mswin32.bat" << 'ENDVSMSWIN32'
+@echo off
+rem -arch=x86 -host_arch=x64: 64-bit-hosted toolchain that targets 32-bit x86.
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x86 -host_arch=x64
+rem C:\llvm-msvc32 is the merged vovkos MSVC x86 LLVM+Clang (LLVM-C.dll, llvm-config, opt, clang-cl).
+set PATH=C:\ruby-mswin32\bin;C:\llvm-msvc32\bin;%PATH%
+rem 32-bit libffi + pkgconf built by vcpkg (x86-windows triplet). See vsshell.bat for why the ffi gem needs these.
+set INCLUDE=C:\vcpkg\installed\x86-windows\include;%INCLUDE%
+set LIB=C:\vcpkg\installed\x86-windows\lib;%LIB%
+set PKG_CONFIG_PATH=C:\vcpkg\installed\x86-windows\lib\pkgconfig
+set PATH=C:\vcpkg\installed\x86-windows\tools\pkgconf;C:\vcpkg\installed\x86-windows\bin;%PATH%
+set BUNDLE_GEMFILE=Z:\gemfiles\Gemfile-mswin32
+powershell.exe -NoExit -Command Set-Location Z:\
+ENDVSMSWIN32
 
 cat > "${STORAGE_DIR}/vsshell-cmd.bat" << 'ENDVSCMD'
 @echo off
@@ -341,6 +404,12 @@ if [[ -e /dev/kvm ]]; then
 else
   echo "WARNING: /dev/kvm not found — VM will run without hardware acceleration (very slow)"
 fi
+
+# For the bash32-ruby-llvm shell, nest a bind mount of ~/ruby-llvm under /shared
+# (dockur only serves the single /shared folder, so nesting is how it becomes a
+# subfolder — Z:\ruby-llvm inside Windows). Docker creates the ${PROJECT_ROOT}/ruby-llvm
+# mountpoint on the host; it is gitignored.
+RUBY_LLVM_MOUNT="-v ${HOME}/ruby-llvm:/shared/ruby-llvm"
 
 if [[ -n "${usage_iso:-}" && -z "${usage_rebuild:-}" ]]; then
   echo "WARNING: --iso has no effect without --rebuild (it only controls what a fresh install uses); ignoring" >&2
@@ -381,6 +450,7 @@ docker run --rm -d \
   --name "$RUN_CONTAINER" \
   $KVM_FLAG \
   $ISO_MOUNT \
+  $RUBY_LLVM_MOUNT \
   --cap-add NET_ADMIN \
   -p 2222:22 \
   -p 8006:8006 \
@@ -450,6 +520,11 @@ case "$usage_shell" in
     # MINGW32 environment for 32-bit Ruby; Gemfile-win32 pins ruby-llvm ~> 21 (MSYS2 i686 max).
     $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-bash32.bat"
     ;;
+  bash32-ruby-llvm)
+    # Same 32-bit MINGW32 Ruby, but cd'd into the nested ~/ruby-llvm mount (Z:\ruby-llvm)
+    # with BUNDLE_GEMFILE/BUNDLE_WITHOUT cleared and OPT=opt — for running ruby-llvm's own suite.
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-bash32-ruby-llvm.bat"
+    ;;
   cygwin)
     # Cygwin: /cygdrive/z for Z:; td_errno = C errno, td_winapi_errno = GetLastError() (distinct channels).
     $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\shell-cygwin.bat"
@@ -461,6 +536,10 @@ case "$usage_shell" in
   mswin-cmd)
     # Same as mswin but drops into cmd.exe instead of PowerShell.
     $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\vsshell-cmd.bat"
+    ;;
+  mswin32)
+    # 32-bit MSVC Ruby (jun66j5 mswin32) + vovkos MSVC x86 LLVM 21 (C:\llvm-msvc32) + VS x86 env.
+    $SSH "${NET_USE_Z} & Z:\\mise-tasks\\win-debug-storage\\vsshell-mswin32.bat"
     ;;
   mswin-msys)
     # VS dev env + mswin Ruby + MSYS2 UCRT64 LLVM. Useful for comparing MinGW vs MSVC LLVM behaviour.
