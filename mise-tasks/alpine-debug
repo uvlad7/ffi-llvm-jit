@@ -24,10 +24,10 @@ if ! docker image inspect "$IMAGE" &>/dev/null; then
       apk add --no-cache ruby ruby-dev ruby-bundler build-base llvm18-dev clang18 nano
       echo "ruby version: $(ruby --version)"
       echo "llvm version: $(llvm-config-18 --version)"
-      bundle config set --global without development
+      export BUNDLE_WITHOUT=development
       bundle install
     '
-  docker commit "$CONTAINER_NAME" "$IMAGE"
+  docker commit --change "ENV BUNDLE_WITHOUT=development" "$CONTAINER_NAME" "$IMAGE"
 fi
 
 echo "==> Starting alpine:3.21 container (matches CI)..."

@@ -30,16 +30,17 @@ if ! docker image inspect "$IMAGE" &>/dev/null; then
         ruby ruby-dev ruby-bundler build-essential llvm-18-dev clang-18 nano
       echo "ruby version: $(ruby --version)"
       echo "llvm version: $(llvm-config-18 --version)"
-      bundle config set --global without development
+      export BUNDLE_WITHOUT=development
       bundle install
     '
-  docker commit "$CONTAINER_NAME" "$IMAGE"
+  docker commit --change "ENV BUNDLE_WITHOUT=development" "$CONTAINER_NAME" "$IMAGE"
 fi
 
 echo "==> Starting riscv64 Ubuntu 24.04 container (matches CI)..."
 docker run --rm -it \
   --platform linux/riscv64 \
   -v "${PROJECT_ROOT}:/workspace" \
+  -v "${HOME}/ruby-llvm:/ruby-llvm" \
   -w /workspace \
   "$IMAGE" \
   bash

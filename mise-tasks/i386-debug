@@ -32,11 +32,11 @@ if ! docker image inspect "$IMAGE" &>/dev/null; then
       apt-get install -y --no-install-recommends llvm-18-dev clang-18
       echo "ruby version: $(ruby --version)"
       echo "llvm version: $(llvm-config-18 --version)"
-      bundle config set --global without development
+      export BUNDLE_WITHOUT=development
       bundle config set --global force_ruby_platform true
       BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_1 bundle install
     '
-  docker commit --change "ENV BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_1" "$CONTAINER_NAME" "$IMAGE"
+  docker commit --change "ENV BUNDLE_GEMFILE=gemfiles/Gemfile-ruby_3_1" --change "ENV BUNDLE_WITHOUT=development" "$CONTAINER_NAME" "$IMAGE"
 fi
 
 echo "==> Starting i386/debian:12 container (matches CI)..."
