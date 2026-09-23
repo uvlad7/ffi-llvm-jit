@@ -150,6 +150,19 @@ jobs:
           #   gemfile: 'ruby_3_4'
           #   default_clang: false
 
+          # IBM Power/Z runners (https://github.com/IBM/actionspz, onboarded via
+          # https://github.com/IBM/actionspz/issues/117); same story as RISC-V above:
+          # ruby/setup-ruby has no prebuilts, so we build Ruby with ruby-build. Keep these
+          # to a single Ruby/LLVM combo each — the point is arch coverage, not a full matrix.
+          - os: ubuntu-24.04-ppc64le
+            gemfile: ''
+            default_clang: false
+            label: 'Ruby 3.3, LLVM 18'
+          - os: ubuntu-24.04-s390x
+            gemfile: ''
+            default_clang: false
+            label: 'Ruby 3.3, LLVM 18'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -163,6 +176,15 @@ jobs:
             echo "CLANG=clang" >> "$GITHUB_ENV"
             echo "CLANGXX=clang++" >> "$GITHUB_ENV"
           fi
+          # Architectures with no ruby/setup-ruby prebuilts: we build Ruby ourselves via
+          # ruby-build and place it in the tool cache dir setup-ruby's actions/tool-cache
+          # lookup expects, i.e. Node's os.arch() name for that arch (not always == uname -m;
+          # notably ppc64le uname reports as Node arch 'ppc64', not 'ppc64le').
+          case '${{ matrix.os }}' in
+            *riscv*) echo "BUILD_ARCH=riscv64" >> "$GITHUB_ENV" ;;
+            *ppc64le*) echo "BUILD_ARCH=ppc64" >> "$GITHUB_ENV" ;;
+            *s390x*) echo "BUILD_ARCH=s390x" >> "$GITHUB_ENV" ;;
+          esac
 
       - if: runner.os == 'Linux'
         run: |
@@ -177,23 +199,23 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew update && brew install "llvm@${LLVM_MAJOR_VERSION}" && brew link "llvm@${LLVM_MAJOR_VERSION}" --force
 
-      - if: contains(matrix.os, 'riscv')
-        name: Restore Ruby cache (riscv64)
+      - if: env.BUILD_ARCH != ''
+        name: Restore Ruby cache (${{ matrix.os }})
         id: ruby-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.tool_cache }}/Ruby
           key: ruby-${{ matrix.os }}-${{ env.RUBY_VERSION }}
 
-      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+      - if: env.BUILD_ARCH != '' && steps.ruby-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: rbenv/ruby-build
           ref: v20260520
           path: tmp/ruby-build
 
-      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
-        name: Build Ruby (riscv64)
+      - if: env.BUILD_ARCH != '' && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Build Ruby (${{ matrix.os }})
         run: |
           sudo apt-get install -y --no-install-recommends \
             autoconf bison patch build-essential libssl-dev libyaml-dev \
@@ -202,11 +224,11 @@ jobs:
           RUBY_EXACT=$(ruby-build --definitions | grep -E "^${RUBY_VERSION}\." | sort -V | tail -1)
           echo "RUBY_EXACT=${RUBY_EXACT}"
           [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition found for Ruby ${RUBY_VERSION}"; exit 1; }
-          ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
-          touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
+          ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/${BUILD_ARCH}"
+          touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/${BUILD_ARCH}.complete"
 
-      - if: contains(matrix.os, 'riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
-        name: Save Ruby cache (riscv64)
+      - if: env.BUILD_ARCH != '' && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Save Ruby cache (${{ matrix.os }})
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.tool_cache }}/Ruby
