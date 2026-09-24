@@ -36,7 +36,6 @@ module FFI
         'aarch64' => :LLVMInitializeAArch64AsmParser,
         'arm64' => :LLVMInitializeAArch64AsmParser,
         'powerpc64le' => :LLVMInitializePowerPCAsmParser,
-        's390x' => :LLVMInitializeSystemZAsmParser,
       }.freeze
       # LLVM_MOD.triple => "arm64-apple-macosx15.0.0" / "x86_64-apple-macosx15.0.0"
       # LLVM::C.get_default_target_triple => "arm64-apple-darwin24.6.0" / "x86_64-apple-darwin24.6.0"
