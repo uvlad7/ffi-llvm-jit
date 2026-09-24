@@ -67,6 +67,13 @@ module FFI
       raw_module_triple = LLVM_MOD.triple.empty? ? raw_default_triple : LLVM_MOD.triple
       module_triple = normalize_triple.call(raw_module_triple)
       default_triple = normalize_triple.call(raw_default_triple)
+
+      $stderr.puts "TRIPLE_DEBUG raw_default=#{raw_default_triple} raw_module=#{raw_module_triple} " \
+        "norm_default=#{default_triple} norm_module=#{module_triple} " \
+        "host_cpu=#{RbConfig::CONFIG['host_cpu']} host_os=#{RbConfig::CONFIG['host_os']} " \
+        "target_cpu=#{RbConfig::CONFIG['target_cpu']} target_os=#{RbConfig::CONFIG['target_os']} " \
+        "ffi_platform_os=#{FFI::Platform::OS} ffi_platform_arch=#{FFI::Platform::ARCH}"
+
       unless module_triple.split('-', 2).first == default_triple.split('-', 2).first
         raise "llvm_bitcode module triple (#{module_triple}) doesn't match the host default " \
               "triple (#{default_triple}); was llvm_bitcode compiled for a different architecture?"
