@@ -2,6 +2,7 @@
 
 require 'rbconfig'
 require 'set'
+require 'json'
 
 require 'ffi'
 require 'llvm/core'
@@ -68,11 +69,19 @@ module FFI
       module_triple = normalize_triple.call(raw_module_triple)
       default_triple = normalize_triple.call(raw_default_triple)
 
-      $stderr.puts "TRIPLE_DEBUG raw_default=#{raw_default_triple} raw_module=#{raw_module_triple} " \
-        "norm_default=#{default_triple} norm_module=#{module_triple} " \
-        "host_cpu=#{RbConfig::CONFIG['host_cpu']} host_os=#{RbConfig::CONFIG['host_os']} " \
-        "target_cpu=#{RbConfig::CONFIG['target_cpu']} target_os=#{RbConfig::CONFIG['target_os']} " \
-        "ffi_platform_os=#{FFI::Platform::OS} ffi_platform_arch=#{FFI::Platform::ARCH}"
+      $stderr.puts "TRIPLE_DEBUG #{{
+        raw_default: raw_default_triple,
+        raw_module: raw_module_triple,
+        norm_default: default_triple,
+        norm_module: module_triple,
+        rbconfig_config: RbConfig::CONFIG.slice('host_cpu', 'target_cpu', 'host_os', 'target_os'),
+        rbconfig_makefile_config: RbConfig::MAKEFILE_CONFIG.slice('host_cpu', 'target_cpu', 'host_os', 'target_os'),
+        ffi_platform: {
+          os: FFI::Platform::OS, arch: FFI::Platform::ARCH, cpu: FFI::Platform::CPU, name: FFI::Platform::NAME,
+          libc: FFI::Platform::LIBC,
+          byte_order: FFI::Platform::BYTE_ORDER == FFI::Platform::LITTLE_ENDIAN ? 'little' : 'big',
+        },
+      }.to_json}"
 
       unless module_triple.split('-', 2).first == default_triple.split('-', 2).first
         raise "llvm_bitcode module triple (#{module_triple}) doesn't match the host default " \
