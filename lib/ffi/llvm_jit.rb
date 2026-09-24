@@ -35,6 +35,10 @@ module FFI
         'i686' => :LLVMInitializeX86AsmParser,
         'aarch64' => :LLVMInitializeAArch64AsmParser,
         'arm64' => :LLVMInitializeAArch64AsmParser,
+        # untested on real hardware before IBM/actionspz#117 runners; watch for MCJIT
+        # relocation issues like the ones that block riscv64
+        'powerpc64le' => :LLVMInitializePowerPCAsmParser,
+        's390x' => :LLVMInitializeSystemZAsmParser,
       }.freeze
       # LLVM_MOD.triple => "arm64-apple-macosx15.0.0" / "x86_64-apple-macosx15.0.0"
       # LLVM::C.get_default_target_triple => "arm64-apple-darwin24.6.0" / "x86_64-apple-darwin24.6.0"
