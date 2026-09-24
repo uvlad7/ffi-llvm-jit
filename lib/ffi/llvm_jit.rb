@@ -261,7 +261,10 @@ module FFI
         raise UnsupportedError, "Can't use LLVM after fork" unless Process.pid == INIT_PID
 
         raise UnsupportedError, "MCJIT is not supported on #{LLVM_TRIPLE.join('-')}" unless
-          SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) && SUPPORTED_OS.any? { |r| LLVM_TRIPLE[2] =~ r }
+          SUPPORTED_ARCHS.key?(LLVM_TRIPLE[0]) &&
+          # OS lives in LLVM_TRIPLE[2] for arch-vendor-os-abi triples (e.g. x86_64-unknown-linux-gnu),
+          # but some targets have no vendor field (e.g. s390x-linux-gnu), shifting it to LLVM_TRIPLE[1]
+          SUPPORTED_OS.any? { |r| LLVM_TRIPLE[1..].join('-') =~ r }
 
         unknown_options = options.keys - %i[convention type_map blocking enums]
         unless unknown_options.empty?
