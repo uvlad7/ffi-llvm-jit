@@ -69,7 +69,7 @@ module FFI
       module_triple = normalize_triple.call(raw_module_triple)
       default_triple = normalize_triple.call(raw_default_triple)
 
-      $stderr.puts "TRIPLE_DEBUG #{{
+      warn "TRIPLE_DEBUG #{{
         raw_default: raw_default_triple,
         raw_module: raw_module_triple,
         norm_default: default_triple,
