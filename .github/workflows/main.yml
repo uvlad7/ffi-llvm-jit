@@ -150,10 +150,7 @@ jobs:
           #   gemfile: 'ruby_3_4'
           #   default_clang: false
 
-          # IBM Power/Z runners (https://github.com/IBM/actionspz, onboarded via
-          # https://github.com/IBM/actionspz/issues/117); same story as RISC-V above:
-          # ruby/setup-ruby has no prebuilts, so we build Ruby with ruby-build. Keep these
-          # to a single Ruby/LLVM combo each — the point is arch coverage, not a full matrix.
+          # IBM Power/Z runners: https://github.com/IBM/actionspz/issues/117
           - os: ubuntu-24.04-ppc64le
             gemfile: ''
             default_clang: false
@@ -176,10 +173,7 @@ jobs:
             echo "CLANG=clang" >> "$GITHUB_ENV"
             echo "CLANGXX=clang++" >> "$GITHUB_ENV"
           fi
-          # Architectures with no ruby/setup-ruby prebuilts: we build Ruby ourselves via
-          # ruby-build and place it in the tool cache dir setup-ruby's actions/tool-cache
-          # lookup expects, i.e. Node's os.arch() name for that arch (not always == uname -m;
-          # notably ppc64le uname reports as Node arch 'ppc64', not 'ppc64le').
+          # Node's os.arch() name, used by setup-ruby's tool-cache lookup below (ppc64le != 'ppc64le')
           case '${{ matrix.os }}' in
             *riscv*) echo "BUILD_ARCH=riscv64" >> "$GITHUB_ENV" ;;
             *ppc64le*) echo "BUILD_ARCH=ppc64" >> "$GITHUB_ENV" ;;
