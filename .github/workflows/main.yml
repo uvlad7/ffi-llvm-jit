@@ -531,7 +531,7 @@ jobs:
           githubToken: ${{ github.token }}
           install: |
             apt-get update
-            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential llvm-18-dev clang-18
+            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential libyaml-dev llvm-18-dev clang-18
           run: |
             echo "ruby version: $(ruby --version)"
             echo "llvm version: $(llvm-config-18 --version)"
