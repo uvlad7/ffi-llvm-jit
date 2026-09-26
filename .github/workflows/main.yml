@@ -512,22 +512,26 @@ jobs:
   qemu:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.extended)
     runs-on: ubuntu-latest
-    name: Ruby on Ubuntu 24.04 (${{ matrix.arch }}, QEMU)
+    name: Ruby on ${{ matrix.distro }} (${{ matrix.arch }}, QEMU)
     strategy:
       fail-fast: false
       matrix:
-        # Also s390x, but it takes 5+ hours to complete
-        arch: [armv7, ppc64le]
+        include:
+          - { arch: ppc64le, distro: ubuntu24.04 }
+          - { arch: s390x,   distro: ubuntu24.04 }
+          - { arch: riscv64, distro: ubuntu24.04 }
+          - { arch: armv7,   distro: ubuntu24.04 }
+          - { arch: armv6,   distro: bookworm } # no ubuntu support for armv6
     steps:
       - uses: actions/checkout@v4
       - uses: uraimo/run-on-arch-action@v3
         with:
           arch: ${{ matrix.arch }}
-          distro: ubuntu24.04
+          distro: ${{ matrix.distro }}
           githubToken: ${{ github.token }}
           install: |
             apt-get update
-            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential llvm-18-dev clang-18  # ruby: Ubuntu 24.04 current (3.2.x)
+            apt-get install -y --no-install-recommends ruby ruby-dev ruby-bundler build-essential llvm-18-dev clang-18
           run: |
             echo "ruby version: $(ruby --version)"
             echo "llvm version: $(llvm-config-18 --version)"
