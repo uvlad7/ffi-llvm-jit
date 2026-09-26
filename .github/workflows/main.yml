@@ -332,29 +332,3 @@ jobs:
             bundle config set --local frozen true
             bundle install
             bundle exec rake spec
-
-  # Temporary diagnostic: isolate whether Thread#kill/#stop? interrupting a thread blocked
-  # in a GVL-released native call works at all on this runner, with no LLVM/JIT/bundler
-  # involved. Bounded with `timeout` so it can't hang indefinitely like the real spec did.
-  s390x_thread_diag:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04-s390x
-    steps:
-      - run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends ruby
-          cat <<'RUBY' > /tmp/t.rb
-          puts "start, ruby #{RUBY_VERSION} on #{RUBY_PLATFORM}"
-          t = Thread.new { sleep 3600 }
-          sleep 0.1 until t.stop?
-          puts "thread reported stop?, killing"
-          t.kill
-          t.join
-          puts "joined, value=#{t.value.inspect}"
-          RUBY
-          timeout 30 ruby /tmp/t.rb
-          status=$?
-          if [ "$status" -eq 124 ]; then
-            echo "TIMED OUT: plain Ruby Thread#stop?/#kill hangs on this runner, unrelated to ffi-llvm-jit/LLVM"
-            exit 1
-          fi
-          echo "exit status: $status"
