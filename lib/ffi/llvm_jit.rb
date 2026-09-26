@@ -35,6 +35,8 @@ module FFI
         'i686' => :LLVMInitializeX86AsmParser,
         'aarch64' => :LLVMInitializeAArch64AsmParser,
         'arm64' => :LLVMInitializeAArch64AsmParser,
+        'powerpc64le' => :LLVMInitializePowerPCAsmParser,
+        's390x' => :LLVMInitializeSystemZAsmParser,
       }.freeze
       # LLVM_MOD.triple => "arm64-apple-macosx15.0.0" / "x86_64-apple-macosx15.0.0"
       # LLVM::C.get_default_target_triple => "arm64-apple-darwin24.6.0" / "x86_64-apple-darwin24.6.0"
@@ -46,7 +48,32 @@ module FFI
       )
       # puts LLVM_MOD.to_s[/producer: "[^"]+"/]
       LLVM_MOD.verify!
-      LLVM_TRIPLE = LLVM::C.get_default_target_triple.split('-', 3).freeze
+
+      # Fixes up triples a naive hyphen split gets wrong (e.g. s390x-linux-gnu has no vendor field)
+      LLVM::C.attach_function :llvm_normalize_target_triple, :LLVMNormalizeTargetTriple, [:string], :pointer
+      normalize_triple = lambda do |triple|
+        ptr = LLVM::C.llvm_normalize_target_triple(triple)
+        next triple if ptr.null?
+
+        begin
+          ptr.read_string
+        ensure
+          LLVM::C.dispose_message(ptr)
+        end
+      end
+
+      # LLVM_MOD's own triple (what LLVM_ENG below actually JIT-compiles for) can differ
+      # from the process default (see comment above re: macOS); prefer it, but verify arches match
+      raw_default_triple = LLVM::C.get_default_target_triple
+      raw_module_triple = LLVM_MOD.triple.empty? ? raw_default_triple : LLVM_MOD.triple
+      module_triple = normalize_triple.call(raw_module_triple)
+      default_triple = normalize_triple.call(raw_default_triple)
+
+      unless module_triple.split('-', 2).first == default_triple.split('-', 2).first
+        raise "llvm_bitcode module triple (#{module_triple}) doesn't match the host default " \
+              "triple (#{default_triple}); was llvm_bitcode compiled for a different architecture?"
+      end
+      LLVM_TRIPLE = module_triple.split('-').freeze
 
       # Register FFI converter addresses with LLVM's global symbol table
       # before JIT engine creation so they are resolved on first compilation.
