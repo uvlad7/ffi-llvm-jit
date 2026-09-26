@@ -155,11 +155,13 @@ jobs:
             gemfile: ''
             default_clang: false
             label: 'Ruby 3.3, LLVM 18'
-          # MCJIT hangs (not crashes) on SystemZ, looks like a legacy MCJIT/RuntimeDyldELF
-          # issue rather than an app bug -- revisit after an LLJIT/ORC migration
-          # - os: ubuntu-24.04-s390x
-          #   gemfile: ''
-          #   default_clang: false
+          # MCJIT previously hung (not crashed) on SystemZ; retrying since s390x runs fine
+          # (just slow) under QEMU emulation elsewhere, which weakens the theory that it's
+          # a general legacy MCJIT/SystemZ codegen gap
+          - os: ubuntu-24.04-s390x
+            gemfile: ''
+            default_clang: false
+            label: 'Ruby 3.3, LLVM 18'
 
     steps:
       - uses: actions/checkout@v4
