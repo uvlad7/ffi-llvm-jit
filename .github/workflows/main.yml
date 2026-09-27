@@ -344,9 +344,12 @@ jobs:
         include:
           - { arch: ppc64le, distro: ubuntu24.04 }
           - { arch: s390x,   distro: ubuntu24.04 }
-          - { arch: riscv64, distro: ubuntu24.04 }
-          - { arch: armv7,   distro: ubuntu24.04 }
-          - { arch: armv6,   distro: bookworm } # no ubuntu support for armv6
+          # riscv64/armv7/armv6 aren't in SUPPORTED_ARCHS (lib/ffi/llvm_jit.rb) -- MCJIT would
+          # just raise UnsupportedError there, so there's nothing to compare yet. Uncomment if
+          # that ever changes:
+          # - { arch: riscv64, distro: ubuntu24.04 }
+          # - { arch: armv7,   distro: ubuntu24.04 }
+          # - { arch: armv6,   distro: bookworm } # no ubuntu support for armv6
     steps:
       - uses: actions/checkout@v4
       - uses: uraimo/run-on-arch-action@v3
